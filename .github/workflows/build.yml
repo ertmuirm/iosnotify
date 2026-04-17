@@ -9,7 +9,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -36,7 +36,7 @@ jobs:
           zip -r IOSNotify.ipa Payload
 
       - name: Upload unsigned IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: IOSNotify
           path: IOSNotify.ipa
