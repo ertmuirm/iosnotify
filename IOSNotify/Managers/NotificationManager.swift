@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import AppIntents
 import Combine
 
 class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
@@ -51,7 +52,8 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
         ingest(bundleId: bundleId, appName: appName, title: content.title, body: content.body)
     }
 
-    // Called from the Shortcuts AppIntent when an external notification should be forwarded
+    // Entry point for all detected notifications — fires the Shortcuts AutomationTrigger,
+    // forwards to BLE band, and logs the event.
     func ingest(bundleId: String, appName: String, title: String, body: String) {
         var captured = CapturedNotification(appBundleId: bundleId, appName: appName, title: title, body: body)
 
@@ -63,6 +65,7 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
             }
             if monitored.useAsShortcutTrigger {
                 captured.usedAsShortcutTrigger = true
+                postShortcutTrigger(bundleId: bundleId, displayName: monitored.displayName)
             }
         }
 
@@ -73,6 +76,13 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
             }
             self.persistHistory()
         }
+    }
+
+    private func postShortcutTrigger(bundleId: String, displayName: String) {
+        guard #available(iOS 17.0, *) else { return }
+        let entity = MonitoredAppEntity(bundleId: bundleId, displayName: displayName)
+        let trigger = NotificationReceivedTrigger(app: entity)
+        Task { try? await trigger.donate(result: .result()) }
     }
 
     private func persistHistory() {
