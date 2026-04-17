@@ -183,7 +183,7 @@ struct AppRow: View {
             Toggle("", isOn: isOn)
                 .labelsHidden()
                 .tint(Theme.accent)
-                .onChange(of: isOn.wrappedValue) { _ in onChange() }
+                .onChange(of: isOn.wrappedValue) { onChange() }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)

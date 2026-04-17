@@ -35,11 +35,11 @@ struct HomeView: View {
 
                 sectionHeader("SHORTCUTS SETUP")
 
-                infoRow(text: "1. Add apps to monitor in the Apps tab")
-                infoRow(text: "2. Enable 'Shortcut trigger' for each app")
-                infoRow(text: "3. Open Shortcuts > Automation > New Automation")
-                infoRow(text: "4. Scroll to IOSNotify > Notification Received")
-                infoRow(text: "5. Select the app to listen to, then add your actions")
+                infoRow(text: "1. Add apps in the Apps tab, enable 'Shortcut trigger'")
+                infoRow(text: "2. Open Shortcuts > Automation > New Automation")
+                infoRow(text: "3. Trigger: IOSNotify > Notification Received")
+                infoRow(text: "4. Optional: filter by title containing '[AppName]'")
+                infoRow(text: "5. Add your actions — fires silently per notification")
 
                 sectionHeader("RECENT ACTIVITY")
 

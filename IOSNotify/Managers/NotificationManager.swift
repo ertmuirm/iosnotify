@@ -1,6 +1,5 @@
 import Foundation
 import UserNotifications
-import AppIntents
 import Combine
 
 class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
@@ -52,8 +51,8 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
         ingest(bundleId: bundleId, appName: appName, title: content.title, body: content.body)
     }
 
-    // Entry point for all detected notifications — fires the Shortcuts AutomationTrigger,
-    // forwards to BLE band, and logs the event.
+    // Entry point for all detected notifications — forwards to BLE band, fires Shortcuts
+    // passive notification trigger, and logs the event.
     func ingest(bundleId: String, appName: String, title: String, body: String) {
         var captured = CapturedNotification(appBundleId: bundleId, appName: appName, title: title, body: body)
 
@@ -65,7 +64,7 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
             }
             if monitored.useAsShortcutTrigger {
                 captured.usedAsShortcutTrigger = true
-                postShortcutTrigger(bundleId: bundleId, displayName: monitored.displayName)
+                postShortcutTrigger(displayName: monitored.displayName, title: title, body: body)
             }
         }
 
@@ -78,11 +77,17 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
         }
     }
 
-    private func postShortcutTrigger(bundleId: String, displayName: String) {
-        guard #available(iOS 17.0, *) else { return }
-        let entity = MonitoredAppEntity(bundleId: bundleId, displayName: displayName)
-        let trigger = NotificationReceivedTrigger(app: entity)
-        Task { try? await trigger.donate(result: .result()) }
+    // Posts a passive (silent, no banner) local notification from IOSNotify so that
+    // Shortcuts "Notification Received from IOSNotify" automations fire.
+    // Title format "[AppName] title" lets users filter by app name in Shortcuts text matching.
+    private func postShortcutTrigger(displayName: String, title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "[\(displayName)] \(title)"
+        content.body = body
+        content.interruptionLevel = .passive
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        )
     }
 
     private func persistHistory() {

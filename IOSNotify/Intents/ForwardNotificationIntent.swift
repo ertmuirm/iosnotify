@@ -1,28 +1,43 @@
 import AppIntents
 
-// iOS 17+ AutomationTrigger — appears under IOSNotify in Shortcuts > New Automation.
-// When IOSNotify detects a notification from a configured app it posts this trigger,
-// causing any Shortcuts automation that uses it to fire.
-@available(iOS 17.0, *)
-struct NotificationReceivedTrigger: AutomationTrigger {
-    static let title: LocalizedStringResource = "Notification Received"
-    static let description = IntentDescription(
-        "Triggers when a notification arrives from one of your monitored apps."
+// Shortcuts action exposed by IOSNotify.
+// IOSNotify also posts a passive local notification for each forwarded event so that
+// Shortcuts "Notification Received from IOSNotify" can be used as an automation trigger.
+// Format: "[AppName] title" — users can filter by app name using Shortcuts text matching.
+struct NotificationReceivedIntent: AppIntent {
+    static var title: LocalizedStringResource = "Notification Received"
+    static var description = IntentDescription(
+        "Runs when IOSNotify detects a notification from a monitored app."
     )
+    static var openAppWhenRun: Bool = false
 
-    @Parameter(title: "From App", description: "The app whose notifications activate this automation.")
+    @Parameter(title: "From App")
     var app: MonitoredAppEntity
 
+    @Parameter(title: "Title", default: "")
+    var notificationTitle: String
+
+    @Parameter(title: "Body", default: "")
+    var notificationBody: String
+
     static var parameterSummary: some ParameterSummary {
-        Summary("When a notification arrives from \(\.$app)")
+        Summary("Notification from \(\.$app): \(\.$notificationTitle)")
+    }
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        .result(value: "[\(app.displayName)] \(notificationTitle)")
     }
 }
 
-// Provides the trigger in the Shortcuts app gallery.
-@available(iOS 17.0, *)
 struct IOSNotifyShortcuts: AppShortcutsProvider {
-    static var appShortcuts: [AppShortcut] { [] }
-    static var automationTriggers: [AutomationTriggerAppShortcut] {
-        [AutomationTriggerAppShortcut(trigger: NotificationReceivedTrigger.self)]
+    static var appShortcuts: [AppShortcut] {
+        [
+            AppShortcut(
+                intent: NotificationReceivedIntent(),
+                phrases: ["Notification via IOSNotify"],
+                shortTitle: "Notification Received",
+                systemImageName: "bell.badge"
+            )
+        ]
     }
 }
