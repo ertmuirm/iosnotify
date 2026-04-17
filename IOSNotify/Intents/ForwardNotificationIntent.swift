@@ -31,13 +31,11 @@ struct NotificationReceivedIntent: AppIntent {
 
 struct IOSNotifyShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        [
-            AppShortcut(
-                intent: NotificationReceivedIntent(),
-                phrases: ["Notification via IOSNotify"],
-                shortTitle: "Notification Received",
-                systemImageName: "bell.badge"
-            )
-        ]
+        AppShortcut(
+            intent: NotificationReceivedIntent(),
+            phrases: ["Notification via IOSNotify"],
+            shortTitle: "Notification Received",
+            systemImageName: "bell.badge"
+        )
     }
 }
