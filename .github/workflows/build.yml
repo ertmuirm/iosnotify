@@ -1,0 +1,43 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build (unsigned)
+        run: |
+          xcodebuild archive \
+            -scheme IOSNotify \
+            -configuration Release \
+            -archivePath ./build/IOSNotify.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+
+      - name: Package as IPA
+        run: |
+          mkdir -p Payload
+          cp -r ./build/IOSNotify.xcarchive/Products/Applications/IOSNotify.app Payload/
+          chmod +x Payload/IOSNotify.app/IOSNotify
+          zip -r IOSNotify.ipa Payload
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: IOSNotify
+          path: IOSNotify.ipa
+          retention-days: 30
