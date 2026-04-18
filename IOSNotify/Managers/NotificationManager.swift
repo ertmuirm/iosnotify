@@ -2,6 +2,7 @@ import Foundation
 import UserNotifications
 import Combine
 
+@MainActor
 class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
 
@@ -68,13 +69,11 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
             }
         }
 
-        DispatchQueue.main.async {
-            self.recentNotifications.insert(captured, at: 0)
-            if self.recentNotifications.count > self.maxStored {
-                self.recentNotifications = Array(self.recentNotifications.prefix(self.maxStored))
-            }
-            self.persistHistory()
+        recentNotifications.insert(captured, at: 0)
+        if recentNotifications.count > maxStored {
+            recentNotifications = Array(recentNotifications.prefix(maxStored))
         }
+        persistHistory()
     }
 
     // Delivers a silent local notification from IOSNotify so the Shortcuts
