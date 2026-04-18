@@ -56,31 +56,31 @@ struct DiagRow: View {
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss.SSS"
+        f.dateFormat = "HH:mm:ss"
         return f
     }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .center, spacing: 8) {
-                Text(entry.tag)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(tagColor(entry.tag))
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(tagColor(entry.tag).opacity(0.15))
-                    .overlay(RoundedRectangle(cornerRadius: 2).stroke(tagColor(entry.tag), lineWidth: 0.5))
-                Spacer()
-                Text(Self.dateFormatter.string(from: entry.timestamp))
-                    .font(.system(size: 12))
-                    .foregroundColor(Theme.dimText)
-            }
+        HStack(spacing: 6) {
+            Text(Self.dateFormatter.string(from: entry.timestamp))
+                .font(.system(size: 10))
+                .foregroundColor(Theme.dimText)
+                .fixedSize()
+            Text(entry.tag)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(tagColor(entry.tag))
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .background(tagColor(entry.tag).opacity(0.15))
+                .overlay(RoundedRectangle(cornerRadius: 2).stroke(tagColor(entry.tag), lineWidth: 0.5))
+                .fixedSize()
             Text(entry.message)
-                .font(.system(size: 12))
+                .font(.system(size: 11))
                 .foregroundColor(Theme.text)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
         .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
     }
 
@@ -89,7 +89,7 @@ struct DiagRow: View {
         case "INTENT":    return Theme.accent
         case "INGEST":    return Color(red: 0.4, green: 0.6, blue: 1.0)
         case "NOTIF":     return Color.orange
-        case "LIFECYCLE": return Color.purple
+        case "LIFECYCLE": return Theme.dimText
         case "ERROR":     return Color.red
         default:          return Theme.dimText
         }
