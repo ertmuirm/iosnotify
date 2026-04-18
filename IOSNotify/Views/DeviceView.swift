@@ -39,6 +39,11 @@ struct DeviceView: View {
                             bt.disconnect()
                         }
                         .buttonStyle(ThemedButtonStyle())
+
+                        Button("Unbind") {
+                            bt.unbind()
+                        }
+                        .buttonStyle(ThemedButtonStyle())
                     }
                 }
                 .padding(16)
@@ -55,6 +60,9 @@ struct DeviceView: View {
                 infoRow("Write (TX): 6e400002")
                 infoRow("Notify (RX): 6e400003")
                 infoRow("Compatible with FitPro-style bands")
+                infoRow("")
+                infoRow("If the band doesn't respond, tap Unbind")
+                infoRow("to clear the bond, then reconnect.")
             }
         }
         .background(Theme.background)
