@@ -35,15 +35,24 @@ struct HomeView: View {
 
                 sectionHeader("SHORTCUTS SETUP")
 
-                infoRow(text: "1. Tap below to register IOSNotify as a trigger source")
-                infoRow(text: "2. Open Shortcuts → Automation → + → Notification Received")
-                infoRow(text: "3. Choose IOSNotify as the source app")
-                infoRow(text: "4. Filter title containing '[AppName]' for per-app triggers")
-                infoRow(text: "5. Add your actions — fires on each forwarded notification")
+                infoRow(text: "Step 1 — Tap 'Register as trigger' below (one-time)")
+                infoRow(text: "Step 2 — iOS Settings → IOSNotify → Notifications")
+                infoRow(text: "         → set Alerts to 'None', sound off")
+                infoRow(text: "         (IOSNotify still fires Shortcuts silently)")
+                infoRow(text: "Step 3 — Shortcuts → Automation → + →")
+                infoRow(text: "         Notification Received → IOSNotify")
+                infoRow(text: "Step 4 — Filter: title contains '[AppName]'")
+                infoRow(text: "         for per-app triggers")
+                infoRow(text: "Step 5 — Enable 'Shortcut trigger' per app in Apps tab")
+
+                infoRow(text: "Note: iOS prevents apps from reading other apps'")
+                infoRow(text: "notifications directly. IOSNotify delivers a silent")
+                infoRow(text: "relay notification — invisible after Step 2 — which")
+                infoRow(text: "iOS Shortcuts recognises as its trigger source.")
 
                 VStack(alignment: .leading, spacing: 0) {
                     Divider().background(Theme.border)
-                    Button("Register as Shortcuts trigger") {
+                    Button("Register as Shortcuts trigger (one-time)") {
                         notifMgr.sendTestNotification()
                     }
                     .buttonStyle(ThemedButtonStyle(filled: true))
