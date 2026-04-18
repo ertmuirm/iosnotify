@@ -104,19 +104,9 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
             }
             if monitored.useAsShortcutTrigger {
                 captured.usedAsShortcutTrigger = true
-                let triggerMgr = ShortcutsTriggerManager.shared
-                switch triggerMgr.triggerMode {
-                case .message:
-                    if !triggerMgr.phoneNumber.isEmpty {
-                        triggerMgr.enqueue(appName: appName, title: title, body: body)
-                    } else {
-                        DiagnosticLog.shared.log("ingest: message trigger — no phone number set", tag: "INGEST")
-                    }
-                case .shortcutsURL:
-                    // The URL is opened from ForwardNotificationIntent.perform() because
-                    // UIApplication.open() must be called from the active app process, not here.
-                    DiagnosticLog.shared.log("ingest: shortcutsURL mode — will be fired by AppIntent", tag: "INGEST")
-                }
+                // The shortcuts:// URL is opened from ForwardNotificationIntent.perform()
+                // where UIApplication.open() is available.
+                DiagnosticLog.shared.log("ingest: shortcut trigger flagged for AppIntent", tag: "INGEST")
             }
         } else {
             DiagnosticLog.shared.log("ingest: bundle not in monitored list — still logging", tag: "INGEST")

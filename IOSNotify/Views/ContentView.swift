@@ -1,13 +1,7 @@
 import SwiftUI
-import MessageUI
 
 struct ContentView: View {
     @State private var selectedTab: Tab = .home
-    @Environment(\.scenePhase) private var scenePhase
-    @ObservedObject private var triggerMgr = ShortcutsTriggerManager.shared
-
-    @State private var showMessageComposer = false
-    @State private var composerBody = ""
 
     enum Tab: String, CaseIterable {
         case home    = "Home"
@@ -63,34 +57,5 @@ struct ContentView: View {
         }
         .background(Theme.background.ignoresSafeArea())
         .preferredColorScheme(.dark)
-        .onChange(of: scenePhase) { phase in
-            if phase == .active {
-                checkPendingMessages()
-            }
-        }
-        .sheet(isPresented: $showMessageComposer) {
-            if MFMessageComposeViewController.canSendText() {
-                MessageComposerView(
-                    recipients: [triggerMgr.phoneNumber],
-                    body: composerBody
-                ) { sent in
-                    showMessageComposer = false
-                    DiagnosticLog.shared.log("Message sheet dismissed — sent=\(sent)", tag: "TRIGGER")
-                }
-            }
-        }
-    }
-
-    private func checkPendingMessages() {
-        guard triggerMgr.triggerMode == .message,
-              !triggerMgr.phoneNumber.isEmpty,
-              !triggerMgr.pendingMessages.isEmpty,
-              MFMessageComposeViewController.canSendText(),
-              !showMessageComposer,
-              let text = triggerMgr.drainAsText()
-        else { return }
-
-        composerBody = text
-        showMessageComposer = true
     }
 }

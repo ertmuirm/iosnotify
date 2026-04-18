@@ -4,7 +4,7 @@ import UIKit
 struct NotificationReceivedIntent: AppIntent {
     static var title: LocalizedStringResource = "Log Notification"
     static var description = IntentDescription(
-        "Logs a notification in iOS Notify, forwards it to your band, and optionally triggers your Shortcuts automation."
+        "Logs a notification in iOS Notify, forwards it to your band, and triggers your Shortcuts automation."
     )
     static var openAppWhenRun: Bool = false
 
@@ -33,41 +33,31 @@ struct NotificationReceivedIntent: AppIntent {
                 title: notifTitle,
                 body: notifBody
             )
-        }
 
-        // For "Run Shortcut (URL)" mode: open the named Shortcut directly.
-        // This fires immediately from the AppIntent process without any user interaction.
-        await openShortcutsURLIfNeeded()
-
-        return .result(value: "[\(app.displayName)] \(notifTitle)")
-    }
-
-    private func openShortcutsURLIfNeeded() async {
-        await MainActor.run {
-            let triggerMgr = ShortcutsTriggerManager.shared
-            guard triggerMgr.triggerMode == .shortcutsURL else { return }
-
+            // If this app has "Shortcut trigger" enabled, open the named Shortcut directly.
+            // Fires immediately, no user interaction needed.
             let appList = AppListManager.shared
-            guard let monitored = appList.app(for: app.id),
-                  monitored.useAsShortcutTrigger else { return }
-
-            guard let url = triggerMgr.shortcutsURL(
-                appName: app.displayName,
-                bundleId: app.id,
-                title: notifTitle,
-                body: notifBody
-            ) else {
-                DiagnosticLog.shared.log("shortcutsURL: no shortcut name configured", tag: "TRIGGER")
-                return
-            }
-
-            DiagnosticLog.shared.log("Opening: \(url.absoluteString.prefix(100))", tag: "TRIGGER")
-            UIApplication.shared.open(url, options: [:]) { success in
-                Task { @MainActor in
-                    DiagnosticLog.shared.log("shortcuts:// open result=\(success)", tag: "TRIGGER")
+            if let monitored = appList.app(for: app.id), monitored.useAsShortcutTrigger {
+                let triggerMgr = ShortcutsTriggerManager.shared
+                if let url = triggerMgr.shortcutsURL(
+                    appName: app.displayName,
+                    bundleId: app.id,
+                    title: notifTitle,
+                    body: notifBody
+                ) {
+                    DiagnosticLog.shared.log("Opening: \(url.absoluteString.prefix(100))", tag: "TRIGGER")
+                    UIApplication.shared.open(url, options: [:]) { success in
+                        Task { @MainActor in
+                            DiagnosticLog.shared.log("shortcuts:// open result=\(success)", tag: "TRIGGER")
+                        }
+                    }
+                } else {
+                    DiagnosticLog.shared.log("shortcutsURL: no shortcut name configured", tag: "TRIGGER")
                 }
             }
         }
+
+        return .result(value: "[\(app.displayName)] \(notifTitle)")
     }
 }
 

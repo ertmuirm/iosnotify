@@ -55,7 +55,6 @@ struct HomeView: View {
                     .buttonStyle(ThemedButtonStyle())
                     .padding(16)
 
-                // ── STEP 1: Detect notifications ─────────────────────────────
                 sectionHeader("STEP 1 — DETECT NOTIFICATIONS")
 
                 infoRow(text: "iOS sandboxing prevents reading other apps'")
@@ -69,37 +68,33 @@ struct HomeView: View {
                 infoRow(text: "     'Ask Before Running'")
                 infoRow(text: "  → Notifications now appear in Log tab")
 
-                // ── STEP 2: Trigger other Shortcuts ──────────────────────────
-                sectionHeader("STEP 2 — SHORTCUTS TRIGGER MODE")
+                sectionHeader("STEP 2 — TRIGGER A SHORTCUT")
 
-                // Mode picker
-                HStack {
-                    Text("Trigger via")
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundColor(Theme.text)
-                    Spacer()
-                    Picker("", selection: Binding(
-                        get: { triggerMgr.triggerMode },
-                        set: { triggerMgr.triggerMode = $0; triggerMgr.saveSettings() }
-                    )) {
-                        ForEach(TriggerMode.allCases) { mode in
-                            Text(mode.rawValue)
-                                .font(.system(size: 12, design: .monospaced))
-                                .tag(mode)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(Theme.accent)
-                }
-                .modifier(RowStyle())
+                infoRow(text: "When a notification arrives, iOS Notify calls")
+                infoRow(text: "a Shortcut by name with the notification data.")
+                infoRow(text: "Automatic — no taps needed.")
+                infoRow(text: "")
 
-                if triggerMgr.triggerMode == .shortcutsURL {
-                    shortcutsURLSection
-                } else {
-                    messageSection
-                }
+                fieldLabel("SHORTCUT NAME")
+                TextField("iOS Notify Received", text: Binding(
+                    get: { triggerMgr.shortcutName },
+                    set: { triggerMgr.shortcutName = $0; triggerMgr.saveSettings() }
+                ))
+                .textFieldStyle(InlineTextFieldStyle())
+                .autocapitalization(.words)
 
-                // ── RECENT ACTIVITY ───────────────────────────────────────────
+                infoRow(text: "")
+                infoRow(text: "The Shortcut receives JSON as text input:")
+                infoRow(text: "  {\"app\":\"WhatsApp\",\"title\":\"...\",\"body\":\"...\"}")
+                infoRow(text: "")
+                infoRow(text: "Setup:")
+                infoRow(text: "  1. Create a Shortcut named exactly as above")
+                infoRow(text: "  2. Add 'Get Dictionary from Input' action")
+                infoRow(text: "  3. Use 'Get Value for Key' to read")
+                infoRow(text: "     app / title / body")
+                infoRow(text: "  4. Enable 'Shortcut trigger' per app")
+                infoRow(text: "     in the Apps tab")
+
                 sectionHeader("RECENT ACTIVITY")
 
                 if notifMgr.recentNotifications.isEmpty {
@@ -118,99 +113,9 @@ struct HomeView: View {
         .alert("Close this app now", isPresented: $showRegisterAlert) {
             Button("OK") {}
         } message: {
-            Text("A notification will arrive in 5 seconds. Keep iOS Notify in the background so the system registers it as a trigger source.")
+            Text("A notification will arrive in 5 seconds. Keep iOS Notify in the background so the system registers it as a Shortcuts trigger source.")
         }
     }
-
-    // ── Run Shortcut (URL) section ───────────────────────────────────────────
-
-    @ViewBuilder
-    private var shortcutsURLSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            fieldLabel("SHORTCUT NAME")
-            TextField("iOS Notify Received", text: Binding(
-                get: { triggerMgr.shortcutName },
-                set: { triggerMgr.shortcutName = $0; triggerMgr.saveSettings() }
-            ))
-            .textFieldStyle(InlineTextFieldStyle())
-            .autocapitalization(.words)
-
-            infoRow(text: "")
-            infoRow(text: "How it works (automatic — no taps needed):")
-            infoRow(text: "  • iOS Notify calls the Shortcut above by name")
-            infoRow(text: "    whenever a monitored notification arrives")
-            infoRow(text: "  • The Shortcut receives this JSON as text input:")
-            infoRow(text: "    {\"app\":\"WhatsApp\",\"title\":\"...\",\"body\":\"...\"}")
-            infoRow(text: "")
-            infoRow(text: "Setup:")
-            infoRow(text: "  1. In Shortcuts app, create a new Shortcut")
-            infoRow(text: "     named exactly as above")
-            infoRow(text: "  2. Add a 'Get Dictionary from Input' action")
-            infoRow(text: "  3. Use 'Get Value for Key' to extract")
-            infoRow(text: "     app / title / body fields")
-            infoRow(text: "  4. Enable 'Shortcut trigger' for each app")
-            infoRow(text: "     in the Apps tab")
-        }
-    }
-
-    // ── iMessage to Self section ─────────────────────────────────────────────
-
-    @ViewBuilder
-    private var messageSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            fieldLabel("YOUR PHONE NUMBER")
-            TextField("+15551234567", text: Binding(
-                get: { triggerMgr.phoneNumber },
-                set: { triggerMgr.phoneNumber = $0; triggerMgr.saveSettings() }
-            ))
-            .textFieldStyle(InlineTextFieldStyle())
-            .keyboardType(.phonePad)
-
-            infoRow(text: "")
-            infoRow(text: "How it works:")
-            infoRow(text: "  • When a monitored notification arrives,")
-            infoRow(text: "    iOS Notify queues a 🔔 message to send")
-            infoRow(text: "  • Open iOS Notify → a compose sheet appears")
-            infoRow(text: "  • Tap Send → message arrives from yourself")
-            infoRow(text: "  • Shortcuts 'Message Received' automation fires")
-            infoRow(text: "")
-            infoRow(text: "Shortcuts automation setup:")
-            infoRow(text: "  1. Automation → + → Message")
-            infoRow(text: "  2. Sender: your own number")
-            infoRow(text: "  3. Message contains: 🔔")
-            infoRow(text: "  4. Disable 'Ask Before Running'")
-            infoRow(text: "")
-            if !triggerMgr.pendingMessages.isEmpty {
-                Divider().background(Theme.border)
-                HStack {
-                    Text("\(triggerMgr.pendingMessages.count) message(s) pending")
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundColor(Theme.accent)
-                    Spacer()
-                    Button("Clear") { triggerMgr.clearQueue() }
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.red)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-            }
-
-            infoRow(text: "")
-            infoRow(text: "Also: register iOS Notify as a Shortcuts")
-            infoRow(text: "'Notification Received' trigger source")
-            infoRow(text: "(requires app to be backgrounded):")
-            Divider().background(Theme.border)
-            Button("Register as Notification trigger (one-time)") {
-                notifMgr.sendRegistrationNotification()
-                showRegisterAlert = true
-            }
-            .buttonStyle(ThemedButtonStyle(filled: true))
-            .padding(16)
-            .disabled(notifMgr.authorizationStatus != .authorized)
-        }
-    }
-
-    // ── Helpers ──────────────────────────────────────────────────────────────
 
     @ViewBuilder
     private func sectionHeader(_ text: String) -> some View {
@@ -296,7 +201,6 @@ struct HomeView: View {
     }
 }
 
-// Inline text field used for settings fields in HomeView.
 struct InlineTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
