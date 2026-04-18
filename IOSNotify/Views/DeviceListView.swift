@@ -44,6 +44,12 @@ struct DeviceListView: View {
                     }
                 }
 
+                sectionHeader("NOTIFICATION CATEGORIES")
+
+                ForEach(NotifCategory.allCases) { category in
+                    categoryRow(category)
+                }
+
                 sectionHeader("SETTINGS")
 
                 HStack {
@@ -68,17 +74,19 @@ struct DeviceListView: View {
 
                 sectionHeader("HOW IT WORKS")
 
-                infoRow("Once bonded, iOS streams all notifications to your device")
-                infoRow("via ANCS — the same protocol used by Apple Watch.")
+                infoRow("The app connects using the FitPro Nordic UART protocol and")
+                infoRow("sends a CMD_NOTIFICATIONS_ENABLE command to the band after")
+                infoRow("each connection. The category toggles above control which")
+                infoRow("of the 11 payload bytes are set to 0x01 (on) or 0x00 (off).")
+                infoRow("")
+                infoRow("iOS also enables ANCS on the connection so bands with ANCS")
+                infoRow("firmware support receive notifications directly from the OS.")
                 infoRow("")
                 infoRow("Compatible devices:")
-                infoRow("  • FitPro-compatible smart bands (Nordic UART / ANCS)")
-                infoRow("  • WearOS watches with ANCS support (e.g. Galaxy Watch)")
-                infoRow("  • Any BLE wearable that implements the ANCS GATT profile")
+                infoRow("  • FitPro-compatible smart bands (Nordic UART)")
+                infoRow("  • Any BLE band that supports ANCS GATT (e.g. Galaxy Watch)")
                 infoRow("")
-                infoRow("The app only needs to be launched once to bond. After that,")
-                infoRow("iOS handles reconnection and notification streaming in the")
-                infoRow("background — no need to keep the app open.")
+                infoRow("Launch the app once to bond. iOS reconnects in the background.")
             }
         }
         .background(Theme.background)
@@ -137,6 +145,28 @@ struct DeviceListView: View {
             }
         }
         .modifier(RowStyle())
+    }
+
+    @ViewBuilder
+    private func categoryRow(_ category: NotifCategory) -> some View {
+        let binding = Binding<Bool>(
+            get: { bt.notifCategories[category] ?? true },
+            set: { bt.notifCategories[category] = $0 }
+        )
+        HStack {
+            Text(category.rawValue)
+                .font(.system(size: 12))
+                .foregroundColor(Theme.text)
+            Spacer()
+            Toggle("", isOn: binding)
+                .labelsHidden()
+                .tint(Theme.accent)
+                .scaleEffect(0.8)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Theme.surface)
+        .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
     }
 
     // MARK: - Helpers
