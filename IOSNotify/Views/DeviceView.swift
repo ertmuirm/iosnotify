@@ -51,9 +51,9 @@ struct DeviceView: View {
                 }
 
                 sectionHeader("PROTOCOL INFO")
-                infoRow("Service: FFF0")
-                infoRow("Write characteristic: FFF6")
-                infoRow("Notify characteristic: FFF7")
+                infoRow("Service: 6e400001 (Nordic UART)")
+                infoRow("Write (TX): 6e400002")
+                infoRow("Notify (RX): 6e400003")
                 infoRow("Compatible with FitPro-style bands")
             }
         }
