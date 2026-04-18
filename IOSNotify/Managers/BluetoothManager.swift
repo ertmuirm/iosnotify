@@ -110,7 +110,12 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     func connect(to peripheral: CBPeripheral) {
         stopScan()
         connectionState = .connecting
-        centralManager.connect(peripheral, options: nil)
+        // RequiresANCS tells iOS to ensure the connection is ANCS-capable.
+        // The band firmware then subscribes to the iPhone's ANCS GATT service and
+        // receives ALL iOS notifications automatically — no Shortcuts needed.
+        centralManager.connect(peripheral, options: [
+            CBConnectPeripheralOptionRequiresANCS: true
+        ])
     }
 
     func disconnect() {
@@ -277,8 +282,13 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let services = peripheral.services else { return }
-        for service in services where service.uuid == FitPro.serviceUUID {
-            peripheral.discoverCharacteristics([FitPro.txCharUUID, FitPro.rxCharUUID], for: service)
+        Task { @MainActor in
+            DiagnosticLog.shared.log("Discovered \(services.count) services: \(services.map { $0.uuid.uuidString.prefix(8) }.joined(separator: ", "))", tag: "BT")
+        }
+        for service in services {
+            // Discover characteristics for every service so ANCS proxy
+            // characteristics are found if the band exposes them.
+            peripheral.discoverCharacteristics(nil, for: service)
         }
     }
 
@@ -289,6 +299,26 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
                 sendInitSequence(to: peripheral, char: char)
             } else if char.uuid == FitPro.rxCharUUID {
                 peripheral.setNotifyValue(true, for: char)
+            } else if char.properties.contains(.notify) || char.properties.contains(.indicate) {
+                // Subscribe to any other notifiable characteristic (e.g. ANCS proxy)
+                peripheral.setNotifyValue(true, for: char)
+            }
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard let data = characteristic.value, !data.isEmpty else { return }
+        let bytes = [UInt8](data)
+        // Log raw packets received from the band for diagnostics
+        let hex = bytes.prefix(12).map { String(format: "%02X", $0) }.joined(separator: " ")
+        Task { @MainActor in
+            DiagnosticLog.shared.log("RX [\(characteristic.uuid.uuidString.prefix(8))]: \(hex)\(data.count > 12 ? "…" : "") (\(data.count)B)", tag: "BT")
+        }
+        // Parse FitPro CD-header response packets
+        if bytes.count >= 8, bytes[0] == 0xCD {
+            let group = bytes[3], cmd = bytes[5]
+            Task { @MainActor in
+                DiagnosticLog.shared.log("Band response group=0x\(String(format: "%02X", group)) cmd=0x\(String(format: "%02X", cmd))", tag: "BT")
             }
         }
     }

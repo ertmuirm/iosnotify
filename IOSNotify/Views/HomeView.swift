@@ -4,9 +4,6 @@ struct HomeView: View {
     @ObservedObject private var notifMgr = NotificationManager.shared
     @ObservedObject private var btMgr = BluetoothManager.shared
     @ObservedObject private var appList = AppListManager.shared
-    @ObservedObject private var triggerMgr = ShortcutsTriggerManager.shared
-
-    @State private var showRegisterAlert = false
 
     var body: some View {
         ScrollView {
@@ -59,45 +56,21 @@ struct HomeView: View {
                     .buttonStyle(ThemedButtonStyle())
                     .padding(16)
 
-                sectionHeader("STEP 1 — DETECT NOTIFICATIONS")
+                sectionHeader("HOW NOTIFICATIONS WORK")
 
-                infoRow(text: "iOS sandboxing prevents reading other apps'")
-                infoRow(text: "notifications. Bridge via Shortcuts automation:")
+                infoRow(text: "iOS Notify uses ANCS (Apple Notification Center")
+                infoRow(text: "Service) — the same protocol used by Apple Watch")
+                infoRow(text: "and all BLE smartbands.")
                 infoRow(text: "")
-                infoRow(text: "  1. Shortcuts → Automation → + → App")
-                infoRow(text: "     → select app → Notification Received")
-                infoRow(text: "  2. Add action: iOS Notify → Log Notification")
-                infoRow(text: "  3. Map Notification Title and Body")
-                infoRow(text: "  4. Tap automation → turn off")
-                infoRow(text: "     'Ask Before Running'")
-                infoRow(text: "  → Notifications now appear in Log tab")
-
-                sectionHeader("STEP 2 — TRIGGER A SHORTCUT")
-
-                infoRow(text: "When a notification arrives, iOS Notify calls")
-                infoRow(text: "a Shortcut by name with the notification data.")
-                infoRow(text: "Automatic — no taps needed.")
+                infoRow(text: "Once your band is connected, iOS automatically")
+                infoRow(text: "streams every notification directly to the band.")
+                infoRow(text: "No Shortcuts or extra setup required.")
                 infoRow(text: "")
-
-                fieldLabel("SHORTCUT NAME")
-                TextField("iOS Notify Received", text: Binding(
-                    get: { triggerMgr.shortcutName },
-                    set: { triggerMgr.shortcutName = $0; triggerMgr.saveSettings() }
-                ))
-                .textFieldStyle(InlineTextFieldStyle())
-                .autocapitalization(.words)
-
-                infoRow(text: "")
-                infoRow(text: "The Shortcut receives JSON as text input:")
-                infoRow(text: "  {\"app\":\"WhatsApp\",\"title\":\"...\",\"body\":\"...\"}")
-                infoRow(text: "")
-                infoRow(text: "Setup:")
-                infoRow(text: "  1. Create a Shortcut named exactly as above")
-                infoRow(text: "  2. Add 'Get Dictionary from Input' action")
-                infoRow(text: "  3. Use 'Get Value for Key' to read")
-                infoRow(text: "     app / title / body")
-                infoRow(text: "  4. Enable 'Shortcut trigger' per app")
-                infoRow(text: "     in the Apps tab")
+                infoRow(text: "Steps:")
+                infoRow(text: "  1. Go to the Device tab")
+                infoRow(text: "  2. Tap 'Scan for bands' and select your band")
+                infoRow(text: "  3. Accept the pairing request if prompted")
+                infoRow(text: "  → All notifications now appear on the band")
 
                 sectionHeader("RECENT ACTIVITY")
 
@@ -114,11 +87,6 @@ struct HomeView: View {
             }
         }
         .background(Theme.background)
-        .alert("Close this app now", isPresented: $showRegisterAlert) {
-            Button("OK") {}
-        } message: {
-            Text("A notification will arrive in 5 seconds. Keep iOS Notify in the background so the system registers it as a Shortcuts trigger source.")
-        }
     }
 
     @ViewBuilder
@@ -129,16 +97,6 @@ struct HomeView: View {
             .padding(.horizontal, 16)
             .padding(.top, 24)
             .padding(.bottom, 8)
-    }
-
-    @ViewBuilder
-    private func fieldLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundColor(Theme.accent)
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 4)
     }
 
     @ViewBuilder
@@ -205,14 +163,3 @@ struct HomeView: View {
     }
 }
 
-struct InlineTextFieldStyle: TextFieldStyle {
-    func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration
-            .font(.system(size: 15))
-            .foregroundColor(Theme.text)
-            .padding(12)
-            .background(Theme.surface)
-            .overlay(Rectangle().stroke(Theme.border, lineWidth: 1))
-            .padding(.horizontal, 16)
-    }
-}
