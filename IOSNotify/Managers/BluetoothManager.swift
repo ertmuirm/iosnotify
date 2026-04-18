@@ -43,11 +43,11 @@ private enum FitPro {
     }
 
     // CMD_NOTIFICATION_MESSAGE: group=0x12, cmd=0x12
+    // Format matches Gadgetbridge: icon + 0x00 0x00 + sender SP subject SP body SP, max 250 bytes
     static func notificationPacket(icon: UInt8, sender: String, subject: String, body: String) -> Data {
-        var payload: [UInt8] = [icon]
-        payload += Array((sender  + "\0").utf8)
-        payload += Array((subject + "\0").utf8)
-        payload += Array((body    + "\0").utf8)
+        let raw = Array("\(sender) \(subject) \(body) ".utf8)
+        var payload: [UInt8] = [icon, 0x00, 0x00]
+        payload += raw.prefix(250)
         return packet(group: GROUP_GENERAL, cmd: 0x12, payload: payload)
     }
 
