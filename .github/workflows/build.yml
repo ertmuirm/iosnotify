@@ -11,8 +11,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
-      - name: Install xcodegen
-        run: brew install xcodegen
+      - name: Install dependencies
+        run: brew install xcodegen imagemagick
+
+      - name: Generate app icon
+        run: |
+          convert -size 1024x1024 xc:black \
+            -stroke white -strokewidth 28 -fill none \
+            -draw "path 'M 512,70 L 512,150 C 340,150 220,270 220,440 L 220,670 L 110,750 L 914,750 L 804,670 L 804,440 C 804,270 684,150 512,150 Z'" \
+            -draw "path 'M 110,750 L 914,750 L 914,810 L 110,810 Z'" \
+            -strokewidth 0 -fill white \
+            -draw "circle 512,870 512,910" \
+            IOSNotify/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
 
       - name: Generate Xcode project
         run: xcodegen generate

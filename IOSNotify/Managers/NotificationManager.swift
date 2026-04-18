@@ -8,12 +8,15 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
 
     @Published var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published var recentNotifications: [CapturedNotification] = []
+    @Published var isRecording: Bool = true
 
     private let storageKey = "recentNotifications_v1"
+    private let recordingKey = "isRecording_v1"
     private let maxStored = 200
 
     override init() {
         super.init()
+        isRecording = UserDefaults.standard.object(forKey: recordingKey) as? Bool ?? true
         UNUserNotificationCenter.current().delegate = self
         loadHistory()
         refreshStatus()
@@ -31,7 +34,19 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
         }
     }
 
-    // Called when app is in foreground and a notification arrives for this app
+    func setRecording(_ on: Bool) {
+        isRecording = on
+        UserDefaults.standard.set(on, forKey: recordingKey)
+    }
+
+    func clearHistory() {
+        recentNotifications = []
+        UserDefaults.standard.removeObject(forKey: storageKey)
+    }
+
+    // Called when app is in foreground and a notification for this app arrives.
+    // Third-party app notifications arrive here only when routed via a Shortcuts
+    // automation that calls the "Log Notification" AppIntent action.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
@@ -48,12 +63,13 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
 
     private func process(_ content: UNNotificationContent) {
         let bundleId = content.userInfo["sourceBundle"] as? String ?? ""
-        let appName = content.userInfo["sourceName"] as? String ?? "IOSNotify"
+        let appName = content.userInfo["sourceName"] as? String ?? "iOS Notify"
         ingest(bundleId: bundleId, appName: appName, title: content.title, body: content.body)
     }
 
-    // Entry point for all detected notifications — forwards to BLE band, fires Shortcuts
-    // passive notification trigger, and logs the event.
+    // Entry point for all detected notifications.
+    // Called either from the UNUserNotificationCenterDelegate (for self-notifications)
+    // or from the Shortcuts AppIntent (for third-party app notifications routed via Shortcuts).
     func ingest(bundleId: String, appName: String, title: String, body: String) {
         var captured = CapturedNotification(appBundleId: bundleId, appName: appName, title: title, body: body)
 
@@ -69,6 +85,7 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
             }
         }
 
+        guard isRecording else { return }
         recentNotifications.insert(captured, at: 0)
         if recentNotifications.count > maxStored {
             recentNotifications = Array(recentNotifications.prefix(maxStored))
@@ -76,29 +93,26 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
         persistHistory()
     }
 
-    // Delivers a silent local notification from IOSNotify so the Shortcuts
-    // "Notification Received → IOSNotify" automation trigger fires.
-    // No sound is set — the user should also disable banners for IOSNotify in
-    // iOS Settings so these never surface visually.
-    // Title format "[AppName] title" allows per-app filtering in Shortcuts.
+    // Delivers a local notification from iOS Notify so the Shortcuts
+    // "Notification Received → iOS Notify" automation trigger fires.
+    // Title "[AppName] title" lets users filter by app name in Shortcuts.
+    // Tip: disable banners for iOS Notify in iOS Settings to hide these.
     private func postShortcutTrigger(displayName: String, title: String, body: String) {
         let content = UNMutableNotificationContent()
         content.title = "[\(displayName)] \(title)"
         content.body = body
-        // No sound — delivery is enough to fire the Shortcuts trigger
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         )
     }
 
-    // Sends one notification so IOSNotify immediately appears in the Shortcuts
-    // "Notification Received" trigger source list. After tapping this, the user
-    // should go to iOS Settings → IOSNotify → Notifications → disable Banners
-    // and Sound so future relay notifications never show on screen.
+    // Call once to make iOS Notify appear in Shortcuts "Notification Received" list.
+    // After tapping this, go to iOS Settings → iOS Notify → Notifications →
+    // set Alert Style to None so future relay notifications are invisible.
     func sendTestNotification() {
         let content = UNMutableNotificationContent()
-        content.title = "IOSNotify registered"
-        content.body = "Now go to iOS Settings → IOSNotify → Notifications → disable Banners & Sound. Then set up your Shortcuts automation."
+        content.title = "iOS Notify registered"
+        content.body = "Next: iOS Settings → iOS Notify → Notifications → Alert Style: None. Then create your Shortcuts automation."
         content.sound = .default
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: "iosnotify.test", content: content, trigger: nil)

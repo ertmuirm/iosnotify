@@ -1,31 +1,40 @@
 import AppIntents
 
-// Shortcuts action exposed by IOSNotify.
-// IOSNotify also posts a passive local notification for each forwarded event so that
-// Shortcuts "Notification Received from IOSNotify" can be used as an automation trigger.
-// Format: "[AppName] title" — users can filter by app name using Shortcuts text matching.
+// Shortcuts action: call this from a Shortcuts automation whose trigger is
+// "Notification Received from [any third-party app]". The intent logs the
+// notification to iOS Notify's Recent Activity, forwards it to the BLE band
+// (if enabled for that app), and posts a relay notification so the
+// "Notification Received from iOS Notify" Shortcuts trigger fires.
 struct NotificationReceivedIntent: AppIntent {
-    static var title: LocalizedStringResource = "Notification Received"
+    static var title: LocalizedStringResource = "Log Notification"
     static var description = IntentDescription(
-        "Runs when IOSNotify detects a notification from a monitored app."
+        "Logs a notification in iOS Notify, forwards it to your band, and fires the iOS Notify Shortcuts trigger."
     )
     static var openAppWhenRun: Bool = false
 
     @Parameter(title: "From App")
     var app: MonitoredAppEntity
 
-    @Parameter(title: "Title", default: "")
-    var notificationTitle: String
+    @Parameter(title: "Notification Title", default: "")
+    var notifTitle: String
 
-    @Parameter(title: "Body", default: "")
-    var notificationBody: String
+    @Parameter(title: "Notification Body", default: "")
+    var notifBody: String
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Notification from \(\.$app): \(\.$notificationTitle)")
+        Summary("Log notification from \(\.$app): \(\.$notifTitle)")
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        .result(value: "[\(app.displayName)] \(notificationTitle)")
+        await MainActor.run {
+            NotificationManager.shared.ingest(
+                bundleId: app.id,
+                appName: app.displayName,
+                title: notifTitle,
+                body: notifBody
+            )
+        }
+        return .result(value: "[\(app.displayName)] \(notifTitle)")
     }
 }
 
@@ -33,8 +42,8 @@ struct IOSNotifyShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: NotificationReceivedIntent(),
-            phrases: ["Notification via \(.applicationName)"],
-            shortTitle: "Notification Received",
+            phrases: ["Log notification via \(.applicationName)"],
+            shortTitle: "Log Notification",
             systemImageName: "bell.badge"
         )
     }

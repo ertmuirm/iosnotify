@@ -14,7 +14,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("IOSNotify")
+                Text("iOS Notify")
                     .font(.system(size: 18, weight: .bold, design: .monospaced))
                     .foregroundColor(Theme.text)
                 Spacer()

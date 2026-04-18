@@ -20,7 +20,14 @@ struct NotificationLogView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            filterBar
+            HStack(spacing: 0) {
+                filterBar
+                Divider().frame(width: 1).background(Theme.border)
+                Button("Clear") { notifMgr.clearHistory() }
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.red)
+                    .padding(.horizontal, 16)
+            }
             Divider().background(Theme.border)
 
             if filtered.isEmpty {
