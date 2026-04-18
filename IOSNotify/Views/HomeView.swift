@@ -14,7 +14,7 @@ struct HomeView: View {
 
                 sectionHeader("STATUS")
 
-                statusRow(label: "Notification access",
+                statusRow(label: "Post notifications",
                           value: notifMgr.authorizationStatus == .authorized ? "Granted" : "Not granted",
                           ok: notifMgr.authorizationStatus == .authorized)
                 statusRow(label: "Band connection",
@@ -29,7 +29,7 @@ struct HomeView: View {
 
                 if notifMgr.authorizationStatus != .authorized {
                     Divider().background(Theme.border)
-                    Button("Request notification access") { notifMgr.requestAuthorization() }
+                    Button("Grant notification permission") { notifMgr.requestAuthorization() }
                         .buttonStyle(ThemedButtonStyle())
                         .padding(16)
                 }

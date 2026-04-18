@@ -20,14 +20,21 @@ struct DiagView: View {
             Divider().background(Theme.border)
 
             if log.entries.isEmpty {
-                VStack(spacing: 8) {
+                VStack(spacing: 10) {
                     Spacer()
-                    Text("No diagnostic events")
+                    Text("No events yet")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(Theme.dimText)
+                    Text("iOS blocks direct access to other apps' notifications.\nNotifications reach this app only via a Shortcuts automation:")
                         .font(.system(size: 12))
                         .foregroundColor(Theme.dimText)
-                    Text("Fire a Shortcuts automation to see events here.")
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.dimText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                    Text("Shortcuts → Automation → + → App\n→ select Telegram/WhatsApp/etc → Notification Received\n→ add 'Log Notification' action → disable 'Ask Before Running'")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.accent.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
                     Spacer()
                 }
             } else {

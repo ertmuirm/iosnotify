@@ -22,7 +22,7 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
         isRecording = UserDefaults.standard.object(forKey: recordingKey) as? Bool ?? true
         UNUserNotificationCenter.current().delegate = self
         loadHistory()
-        refreshStatus()
+        requestAuthorizationIfNeeded()
         DiagnosticLog.shared.log("NotificationManager init — isRecording=\(isRecording)", tag: "LIFECYCLE")
     }
 
@@ -35,6 +35,32 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
     func refreshStatus() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             DispatchQueue.main.async { self.authorizationStatus = settings.authorizationStatus }
+        }
+    }
+
+    private func requestAuthorizationIfNeeded() {
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            DispatchQueue.main.async {
+                self?.authorizationStatus = settings.authorizationStatus
+                if settings.authorizationStatus == .notDetermined {
+                    self?.requestAuthorization()
+                }
+                // Log startup status so it's visible in Diag immediately
+                let statusLabel: String
+                switch settings.authorizationStatus {
+                case .authorized:   statusLabel = "granted"
+                case .denied:       statusLabel = "denied"
+                case .provisional:  statusLabel = "provisional"
+                default:            statusLabel = "not determined"
+                }
+                DiagnosticLog.shared.log("Notification permission: \(statusLabel)", tag: "LIFECYCLE")
+                DiagnosticLog.shared.log(
+                    "Notification bridge: Telegram/WhatsApp/etc. only arrive here via a " +
+                    "Shortcuts automation → 'Log Notification' action. Direct reading of " +
+                    "other apps' notifications is blocked by iOS sandboxing.",
+                    tag: "LIFECYCLE"
+                )
+            }
         }
     }
 
