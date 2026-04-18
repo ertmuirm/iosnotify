@@ -21,20 +21,20 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
     }
 
-    @ViewBuilder
-    private var bluetoothStatusBadge: some View {
-        let bt = BluetoothManager.shared
-        let label: String
-        let color: Color
-        switch bt.bluetoothState {
-        case .poweredOn:  label = "BT ON";  color = Theme.accent
-        case .poweredOff: label = "BT OFF"; color = .red
-        default:          label = "BT …";   color = Theme.dimText
+    private var btBadgeInfo: (label: String, color: Color) {
+        switch BluetoothManager.shared.bluetoothState {
+        case .poweredOn:  return ("BT ON",  Theme.accent)
+        case .poweredOff: return ("BT OFF", .red)
+        default:          return ("BT …",   Theme.dimText)
         }
-        Text(label)
+    }
+
+    private var bluetoothStatusBadge: some View {
+        let info = btBadgeInfo
+        return Text(info.label)
             .font(.system(size: 10, weight: .bold))
-            .foregroundColor(color)
+            .foregroundColor(info.color)
             .padding(.horizontal, 6).padding(.vertical, 2)
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(color, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(info.color, lineWidth: 1))
     }
 }
