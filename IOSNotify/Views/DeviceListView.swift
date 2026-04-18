@@ -44,6 +44,28 @@ struct DeviceListView: View {
                     }
                 }
 
+                sectionHeader("SETTINGS")
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Auto-reconnect")
+                            .font(.system(size: 12))
+                            .foregroundColor(Theme.text)
+                        Text("Reconnect in the background if a bonded device drops")
+                            .font(.system(size: 11))
+                            .foregroundColor(Theme.dimText)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $bt.autoReconnect)
+                        .labelsHidden()
+                        .tint(Theme.accent)
+                        .scaleEffect(0.8)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Theme.surface)
+                .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
+
                 sectionHeader("HOW IT WORKS")
 
                 infoRow("Once bonded, iOS streams all notifications to your device")
@@ -73,7 +95,7 @@ struct DeviceListView: View {
                     .foregroundColor(Theme.text)
                 Text(device.connectionState.rawValue)
                     .font(.system(size: 11))
-                    .foregroundColor(device.connectionState == .connected ? Theme.accent : Theme.dimText)
+                    .foregroundColor(stateColor(device.connectionState))
             }
             Spacer()
             if device.connectionState == .connected {
@@ -118,6 +140,15 @@ struct DeviceListView: View {
     }
 
     // MARK: - Helpers
+
+    private func stateColor(_ state: ConnectionState) -> Color {
+        switch state {
+        case .connected:   return Theme.accent
+        case .reconnecting,
+             .connecting:  return Color.orange
+        case .disconnected: return Theme.dimText
+        }
+    }
 
     @ViewBuilder
     private func actionButton(_ label: String, color: Color, action: @escaping () -> Void) -> some View {
