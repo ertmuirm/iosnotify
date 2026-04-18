@@ -16,7 +16,7 @@ struct ContentView: View {
             // Header
             HStack {
                 Text("iOS Notify")
-                    .font(.system(size: 34, weight: .bold))
+                    .font(.system(size: 18, weight: .bold))
                     .foregroundColor(Theme.text)
                 Spacer()
                 Text(selectedTab.rawValue.uppercased())
