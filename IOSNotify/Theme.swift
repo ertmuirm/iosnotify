@@ -30,7 +30,7 @@ struct ThemedButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 15, weight: .medium, design: .monospaced))
+            .font(.system(size: 17, weight: .semibold))
             .foregroundColor(filled ? Theme.background : Theme.accent)
             .padding(.horizontal, 20)
             .padding(.vertical, 10)

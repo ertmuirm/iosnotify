@@ -20,7 +20,7 @@ struct AppSelectionView: View {
                     VStack(spacing: 0) {
                         if appList.isScanning {
                             Text("Scanning for installed apps...")
-                                .font(.system(size: 13, design: .monospaced))
+                                .font(.system(size: 12))
                                 .foregroundColor(Theme.dimText)
                                 .padding(16)
                         }
@@ -44,7 +44,7 @@ struct AppSelectionView: View {
     private var toolbar: some View {
         HStack {
             Text("\(appList.monitoredApps.count) apps")
-                .font(.system(size: 12, design: .monospaced))
+                .font(.system(size: 12))
                 .foregroundColor(Theme.dimText)
             Spacer()
             Button(appList.isScanning ? "Scanning..." : "Rescan") {
@@ -61,11 +61,11 @@ struct AppSelectionView: View {
         VStack(alignment: .leading, spacing: 8) {
             Spacer()
             Text("No installed apps detected.")
-                .font(.system(size: 14, design: .monospaced))
+                .font(.system(size: 12))
                 .foregroundColor(Theme.text)
                 .padding(.horizontal, 16)
             Text("Tap Rescan or add an app manually below.")
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(size: 12))
                 .foregroundColor(Theme.dimText)
                 .padding(.horizontal, 16)
             Spacer()
@@ -87,14 +87,14 @@ struct AppSelectionView: View {
 
                 if !addError.isEmpty {
                     Text(addError)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: 12))
                         .foregroundColor(.red)
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                 }
 
                 Text("Find bundle IDs at AppID.net or similar lookup tools.")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(Theme.dimText)
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
@@ -134,7 +134,7 @@ struct AppSelectionView: View {
     @ViewBuilder
     private func fieldLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .font(.system(size: 15, weight: .semibold))
             .foregroundColor(Theme.accent)
             .padding(.horizontal, 16)
             .padding(.top, 20)
@@ -150,14 +150,14 @@ struct AppRow: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(app.displayName)
-                    .font(.system(size: 15, weight: .medium, design: .monospaced))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(Theme.text)
                 Spacer()
                 Button(role: .destructive) {
                     appList.remove(id: app.id)
                 } label: {
                     Text("Remove")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: 12))
                         .foregroundColor(.red)
                 }
             }
@@ -165,7 +165,7 @@ struct AppRow: View {
             .padding(.top, 12)
 
             Text(app.bundleIdentifier)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 12))
                 .foregroundColor(Theme.dimText)
                 .padding(.horizontal, 16)
                 .padding(.top, 2)
@@ -190,8 +190,8 @@ struct AppRow: View {
     private func toggleCell(label: String, isOn: Binding<Bool>, onChange: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(Theme.dimText)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(Theme.text)
             Toggle("", isOn: isOn)
                 .labelsHidden()
                 .tint(Theme.accent)
@@ -206,7 +206,7 @@ struct AppRow: View {
 struct AppTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
-            .font(.system(size: 14, design: .monospaced))
+            .font(.system(size: 15))
             .foregroundColor(Theme.text)
             .padding(12)
             .background(Theme.surface)

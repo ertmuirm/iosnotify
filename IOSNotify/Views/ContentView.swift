@@ -16,15 +16,15 @@ struct ContentView: View {
             // Header
             HStack {
                 Text("iOS Notify")
-                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .font(.system(size: 34, weight: .bold))
                     .foregroundColor(Theme.text)
                 Spacer()
                 Text(selectedTab.rawValue.uppercased())
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(Theme.accent)
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.vertical, 16)
             .background(Theme.surface)
             .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
 
@@ -46,8 +46,7 @@ struct ContentView: View {
                 ForEach(Tab.allCases, id: \.self) { tab in
                     Button(tab.rawValue) { selectedTab = tab }
                         .font(.system(size: 12,
-                                      weight: selectedTab == tab ? .bold : .regular,
-                                      design: .monospaced))
+                                      weight: selectedTab == tab ? .semibold : .regular))
                         .foregroundColor(selectedTab == tab ? Theme.accent : Theme.dimText)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)

@@ -12,8 +12,8 @@ struct NotificationLogView: View {
 
     var filtered: [CapturedNotification] {
         switch filter {
-        case .all: return notifMgr.recentNotifications
-        case .band: return notifMgr.recentNotifications.filter { $0.forwardedToBand }
+        case .all:      return notifMgr.recentNotifications
+        case .band:     return notifMgr.recentNotifications.filter { $0.forwardedToBand }
         case .shortcut: return notifMgr.recentNotifications.filter { $0.usedAsShortcutTrigger }
         }
     }
@@ -24,7 +24,7 @@ struct NotificationLogView: View {
                 filterBar
                 Divider().frame(width: 1).background(Theme.border)
                 Button("Clear") { notifMgr.clearHistory() }
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(.red)
                     .padding(.horizontal, 16)
             }
@@ -34,7 +34,7 @@ struct NotificationLogView: View {
                 VStack {
                     Spacer()
                     Text("No notifications")
-                        .font(.system(size: 14, design: .monospaced))
+                        .font(.system(size: 12))
                         .foregroundColor(Theme.dimText)
                     Spacer()
                 }
@@ -57,7 +57,7 @@ struct NotificationLogView: View {
                 Button(mode.rawValue) {
                     filter = mode
                 }
-                .font(.system(size: 13, weight: filter == mode ? .bold : .regular, design: .monospaced))
+                .font(.system(size: 13, weight: filter == mode ? .semibold : .regular))
                 .foregroundColor(filter == mode ? Theme.accent : Theme.dimText)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
@@ -79,21 +79,21 @@ struct NotifLogRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(notification.appName)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(Theme.accent)
                 Spacer()
                 Text(notification.timestamp, style: .relative)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(Theme.dimText)
             }
             if !notification.title.isEmpty {
                 Text(notification.title)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(Theme.text)
             }
             if !notification.body.isEmpty {
                 Text(notification.body)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(Theme.dimText)
                     .lineLimit(3)
             }
@@ -114,7 +114,7 @@ struct NotifLogRow: View {
     @ViewBuilder
     private func badge(_ label: String, filled: Bool) -> some View {
         Text(label)
-            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .font(.system(size: 9, weight: .bold))
             .foregroundColor(filled ? Theme.background : Theme.accent)
             .padding(.horizontal, 5).padding(.vertical, 2)
             .background(filled ? Theme.accent : Color.clear)

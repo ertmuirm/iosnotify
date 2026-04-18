@@ -14,11 +14,11 @@ struct DeviceView: View {
                 } else {
                     HStack {
                         Text("No device connected")
-                            .font(.system(size: 14, design: .monospaced))
+                            .font(.system(size: 12))
                             .foregroundColor(Theme.dimText)
                         Spacer()
                         Text(bt.connectionState.rawValue)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.system(size: 12))
                             .foregroundColor(bt.connectionState == .scanning ? Theme.accent : Theme.dimText)
                     }
                     .modifier(RowStyle())
@@ -63,7 +63,7 @@ struct DeviceView: View {
     @ViewBuilder
     private func sectionHeader(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .font(.system(size: 15, weight: .semibold))
             .foregroundColor(Theme.accent)
             .padding(.horizontal, 16)
             .padding(.top, 24)
@@ -75,15 +75,15 @@ struct DeviceView: View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(device.name ?? "Unknown device")
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(Theme.text)
                 Text(device.identifier.uuidString)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(Theme.dimText)
             }
             Spacer()
             Text("Connected")
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(Theme.accent)
         }
         .modifier(RowStyle())
@@ -97,15 +97,15 @@ struct DeviceView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.name ?? "Unknown device")
-                        .font(.system(size: 14, design: .monospaced))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(Theme.text)
                     Text(device.identifier.uuidString)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 12))
                         .foregroundColor(Theme.dimText)
                 }
                 Spacer()
                 Text("Connect")
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(Theme.accent)
             }
         }
@@ -115,7 +115,7 @@ struct DeviceView: View {
     @ViewBuilder
     private func infoRow(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 13, design: .monospaced))
+            .font(.system(size: 12))
             .foregroundColor(Theme.dimText)
             .padding(.horizontal, 16)
             .padding(.vertical, 5)

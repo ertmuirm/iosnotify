@@ -38,7 +38,7 @@ struct HomeView: View {
 
                 HStack {
                     Text("Record notifications")
-                        .font(.system(size: 14, design: .monospaced))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(Theme.text)
                     Spacer()
                     Toggle("", isOn: Binding(
@@ -99,7 +99,7 @@ struct HomeView: View {
 
                 if notifMgr.recentNotifications.isEmpty {
                     Text(notifMgr.isRecording ? "No notifications yet" : "Recording is off")
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(.system(size: 12))
                         .foregroundColor(Theme.dimText)
                         .padding(16)
                 } else {
@@ -120,7 +120,7 @@ struct HomeView: View {
     @ViewBuilder
     private func sectionHeader(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .font(.system(size: 15, weight: .semibold))
             .foregroundColor(Theme.accent)
             .padding(.horizontal, 16)
             .padding(.top, 24)
@@ -130,7 +130,7 @@ struct HomeView: View {
     @ViewBuilder
     private func fieldLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .font(.system(size: 15, weight: .semibold))
             .foregroundColor(Theme.accent)
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -141,11 +141,11 @@ struct HomeView: View {
     private func statusRow(label: String, value: String, ok: Bool) -> some View {
         HStack {
             Text(label)
-                .font(.system(size: 14, design: .monospaced))
+                .font(.system(size: 12))
                 .foregroundColor(Theme.text)
             Spacer()
             Text(value)
-                .font(.system(size: 14, design: .monospaced))
+                .font(.system(size: 12))
                 .foregroundColor(ok ? Theme.accent : Theme.dimText)
         }
         .modifier(RowStyle())
@@ -154,7 +154,7 @@ struct HomeView: View {
     @ViewBuilder
     private func infoRow(text: String) -> some View {
         Text(text)
-            .font(.system(size: 12, design: .monospaced))
+            .font(.system(size: 12))
             .foregroundColor(Theme.dimText)
             .padding(.horizontal, 16)
             .padding(.vertical, 2)
@@ -165,19 +165,19 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(n.appName)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(Theme.accent)
                 Spacer()
                 Text(n.timestamp, style: .time)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(Theme.dimText)
             }
             Text(n.title.isEmpty ? "(no title)" : n.title)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(size: 12))
                 .foregroundColor(Theme.text)
             if !n.body.isEmpty {
                 Text(n.body)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(Theme.dimText)
                     .lineLimit(2)
             }
@@ -193,7 +193,7 @@ struct HomeView: View {
     @ViewBuilder
     private func badge(_ label: String, filled: Bool) -> some View {
         Text(label)
-            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .font(.system(size: 10, weight: .bold))
             .foregroundColor(filled ? Theme.background : Theme.accent)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(filled ? Theme.accent : Color.clear)
@@ -204,7 +204,7 @@ struct HomeView: View {
 struct InlineTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
-            .font(.system(size: 14, design: .monospaced))
+            .font(.system(size: 15))
             .foregroundColor(Theme.text)
             .padding(12)
             .background(Theme.surface)

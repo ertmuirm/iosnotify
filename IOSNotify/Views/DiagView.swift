@@ -7,11 +7,11 @@ struct DiagView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("\(log.entries.count) events")
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(Theme.dimText)
                 Spacer()
                 Button("Clear") { log.clear() }
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(.red)
             }
             .padding(.horizontal, 16)
@@ -23,10 +23,10 @@ struct DiagView: View {
                 VStack(spacing: 8) {
                     Spacer()
                     Text("No diagnostic events")
-                        .font(.system(size: 14, design: .monospaced))
+                        .font(.system(size: 12))
                         .foregroundColor(Theme.dimText)
                     Text("Fire a Shortcuts automation to see events here.")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: 12))
                         .foregroundColor(Theme.dimText)
                     Spacer()
                 }
@@ -57,18 +57,18 @@ struct DiagRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center, spacing: 8) {
                 Text(entry.tag)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundColor(tagColor(entry.tag))
                     .padding(.horizontal, 5).padding(.vertical, 2)
                     .background(tagColor(entry.tag).opacity(0.15))
                     .overlay(RoundedRectangle(cornerRadius: 2).stroke(tagColor(entry.tag), lineWidth: 0.5))
                 Spacer()
                 Text(Self.dateFormatter.string(from: entry.timestamp))
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(Theme.dimText)
             }
             Text(entry.message)
-                .font(.system(size: 12, design: .monospaced))
+                .font(.system(size: 12))
                 .foregroundColor(Theme.text)
                 .fixedSize(horizontal: false, vertical: true)
         }
