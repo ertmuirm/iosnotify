@@ -27,6 +27,10 @@ struct NotificationReceivedIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         await MainActor.run {
+            DiagnosticLog.shared.log(
+                "AppIntent.perform: app=\(app.displayName) id=\(app.id) title=\(notifTitle.prefix(60))",
+                tag: "INTENT"
+            )
             NotificationManager.shared.ingest(
                 bundleId: app.id,
                 appName: app.displayName,

@@ -1,7 +1,5 @@
 import AppIntents
 
-// Entity representing one of the user's configured monitored apps.
-// Appears in the Shortcuts trigger parameter picker.
 struct MonitoredAppEntity: AppEntity {
     static var typeDisplayRepresentation: TypeDisplayRepresentation = "App"
     static var defaultQuery = MonitoredAppQuery()
@@ -25,11 +23,17 @@ struct MonitoredAppEntity: AppEntity {
 }
 
 struct MonitoredAppQuery: EntityQuery {
+    // Called by Shortcuts at automation run-time to resolve saved entity identifiers.
+    // Must never return an empty array for a requested identifier — if the app list
+    // isn't loaded (e.g. background launch), fall back to a stub so perform() still runs.
     func entities(for identifiers: [String]) async throws -> [MonitoredAppEntity] {
         await MainActor.run {
-            AppListManager.shared.monitoredApps
-                .filter { identifiers.contains($0.bundleIdentifier) }
-                .map { MonitoredAppEntity(app: $0) }
+            let saved = AppListManager.shared.monitoredApps
+            return identifiers.map { id in
+                saved.first(where: { $0.bundleIdentifier == id })
+                    .map { MonitoredAppEntity(app: $0) }
+                    ?? MonitoredAppEntity(bundleId: id, displayName: id)
+            }
         }
     }
 

@@ -8,6 +8,7 @@ struct ContentView: View {
         case apps    = "Apps"
         case device  = "Device"
         case log     = "Log"
+        case diag    = "Diag"
     }
 
     var body: some View {
@@ -34,6 +35,7 @@ struct ContentView: View {
                 case .apps:   AppSelectionView()
                 case .device: DeviceView()
                 case .log:    NotificationLogView()
+                case .diag:   DiagView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
