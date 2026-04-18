@@ -43,5 +43,38 @@
 	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>whatsapp</string>
+		<string>tg</string>
+		<string>sgnl</string>
+		<string>fb</string>
+		<string>fb-messenger</string>
+		<string>instagram</string>
+		<string>barcelona</string>
+		<string>twitter</string>
+		<string>discord</string>
+		<string>slack</string>
+		<string>snapchat</string>
+		<string>tiktok</string>
+		<string>googlegmail</string>
+		<string>ms-outlook</string>
+		<string>linkedin</string>
+		<string>youtube</string>
+		<string>spotify</string>
+		<string>viber</string>
+		<string>line</string>
+		<string>weixin</string>
+		<string>reddit</string>
+		<string>twitch</string>
+		<string>pinterest</string>
+		<string>bereal</string>
+		<string>bumble</string>
+		<string>tinder</string>
+		<string>uber</string>
+		<string>lyft</string>
+		<string>skype</string>
+		<string>msteams</string>
+	</array>
 </dict>
 </plist>

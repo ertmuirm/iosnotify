@@ -77,16 +77,29 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
         }
     }
 
-    // Posts a passive (silent, no banner) local notification from IOSNotify so that
-    // Shortcuts "Notification Received from IOSNotify" automations fire.
-    // Title format "[AppName] title" lets users filter by app name in Shortcuts text matching.
+    // Posts a visible local notification from IOSNotify so Shortcuts
+    // "Notification Received → IOSNotify" automations fire.
+    // Title format "[AppName] title" lets users filter by app name via text matching.
+    // Must be visible (not passive) for Shortcuts to recognise it as a trigger source.
     private func postShortcutTrigger(displayName: String, title: String, body: String) {
         let content = UNMutableNotificationContent()
         content.title = "[\(displayName)] \(title)"
         content.body = body
-        content.interruptionLevel = .passive
+        content.sound = .default
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        )
+    }
+
+    // Sends one visible notification immediately so IOSNotify appears in the
+    // Shortcuts "Notification Received" trigger source list straight away.
+    func sendTestNotification() {
+        let content = UNMutableNotificationContent()
+        content.title = "IOSNotify is active"
+        content.body = "Go to Shortcuts → Automation → + → Notification Received → IOSNotify."
+        content.sound = .default
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: "iosnotify.test", content: content, trigger: nil)
         )
     }
 

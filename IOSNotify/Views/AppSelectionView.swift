@@ -9,11 +9,21 @@ struct AppSelectionView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if appList.monitoredApps.isEmpty {
+            toolbar
+
+            Divider().background(Theme.border)
+
+            if appList.monitoredApps.isEmpty && !appList.isScanning {
                 emptyState
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
+                        if appList.isScanning {
+                            Text("Scanning for installed apps...")
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(Theme.dimText)
+                                .padding(16)
+                        }
                         ForEach(appList.monitoredApps) { app in
                             AppRow(app: app)
                         }
@@ -22,28 +32,39 @@ struct AppSelectionView: View {
             }
 
             Divider().background(Theme.border)
-
-            Button("Add app") {
-                showAddSheet = true
-            }
-            .buttonStyle(ThemedButtonStyle(filled: true))
-            .frame(maxWidth: .infinity)
-            .padding(16)
+            Button("Add unlisted app") { showAddSheet = true }
+                .buttonStyle(ThemedButtonStyle())
+                .frame(maxWidth: .infinity)
+                .padding(16)
         }
         .background(Theme.background)
-        .sheet(isPresented: $showAddSheet) {
-            addSheet
+        .sheet(isPresented: $showAddSheet) { addSheet }
+    }
+
+    private var toolbar: some View {
+        HStack {
+            Text("\(appList.monitoredApps.count) apps")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Theme.dimText)
+            Spacer()
+            Button(appList.isScanning ? "Scanning..." : "Rescan") {
+                Task { await appList.scanInstalled() }
+            }
+            .buttonStyle(ThemedButtonStyle(filled: true))
+            .disabled(appList.isScanning)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("No apps configured")
-                .font(.system(size: 15, design: .monospaced))
+            Spacer()
+            Text("No installed apps detected.")
+                .font(.system(size: 14, design: .monospaced))
                 .foregroundColor(Theme.text)
-                .padding(.top, 32)
                 .padding(.horizontal, 16)
-            Text("Add apps to monitor their notifications.")
+            Text("Tap Rescan or add an app manually below.")
                 .font(.system(size: 13, design: .monospaced))
                 .foregroundColor(Theme.dimText)
                 .padding(.horizontal, 16)
@@ -72,7 +93,7 @@ struct AppSelectionView: View {
                         .padding(.top, 8)
                 }
 
-                Text("Tip: Find bundle IDs at AppID.net or similar lookup tools.")
+                Text("Find bundle IDs at AppID.net or similar lookup tools.")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Theme.dimText)
                     .padding(.horizontal, 16)
@@ -81,22 +102,18 @@ struct AppSelectionView: View {
                 Spacer()
             }
             .background(Theme.background.ignoresSafeArea())
-            .navigationTitle("Add App")
+            .navigationTitle("Add Unlisted App")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        resetForm()
-                        showAddSheet = false
-                    }
-                    .foregroundColor(Theme.accent)
+                    Button("Cancel") { resetForm(); showAddSheet = false }
+                        .foregroundColor(Theme.accent)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        commitAdd()
-                    }
-                    .foregroundColor(Theme.accent)
-                    .disabled(newBundleId.trimmingCharacters(in: .whitespaces).isEmpty || newDisplayName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button("Add") { commitAdd() }
+                        .foregroundColor(Theme.accent)
+                        .disabled(newBundleId.trimmingCharacters(in: .whitespaces).isEmpty ||
+                                  newDisplayName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
@@ -109,15 +126,10 @@ struct AppSelectionView: View {
         guard !bid.isEmpty, !name.isEmpty else { addError = "Both fields are required."; return }
         guard !bid.contains(" ") else { addError = "Bundle ID cannot contain spaces."; return }
         appList.add(bundleId: bid, displayName: name)
-        resetForm()
-        showAddSheet = false
+        resetForm(); showAddSheet = false
     }
 
-    private func resetForm() {
-        newBundleId = ""
-        newDisplayName = ""
-        addError = ""
-    }
+    private func resetForm() { newBundleId = ""; newDisplayName = ""; addError = "" }
 
     @ViewBuilder
     private func fieldLabel(_ text: String) -> some View {

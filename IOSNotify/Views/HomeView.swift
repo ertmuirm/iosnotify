@@ -35,11 +35,21 @@ struct HomeView: View {
 
                 sectionHeader("SHORTCUTS SETUP")
 
-                infoRow(text: "1. Add apps in the Apps tab, enable 'Shortcut trigger'")
-                infoRow(text: "2. Open Shortcuts > Automation > New Automation")
-                infoRow(text: "3. Trigger: IOSNotify > Notification Received")
-                infoRow(text: "4. Optional: filter by title containing '[AppName]'")
-                infoRow(text: "5. Add your actions — fires silently per notification")
+                infoRow(text: "1. Tap below to register IOSNotify as a trigger source")
+                infoRow(text: "2. Open Shortcuts → Automation → + → Notification Received")
+                infoRow(text: "3. Choose IOSNotify as the source app")
+                infoRow(text: "4. Filter title containing '[AppName]' for per-app triggers")
+                infoRow(text: "5. Add your actions — fires on each forwarded notification")
+
+                VStack(alignment: .leading, spacing: 0) {
+                    Divider().background(Theme.border)
+                    Button("Register as Shortcuts trigger") {
+                        notifMgr.sendTestNotification()
+                    }
+                    .buttonStyle(ThemedButtonStyle(filled: true))
+                    .padding(16)
+                    .disabled(notifMgr.authorizationStatus != .authorized)
+                }
 
                 sectionHeader("RECENT ACTIVITY")
 
