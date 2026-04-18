@@ -1,251 +1,108 @@
 import Foundation
 import CoreBluetooth
-import Combine
 
-// FitPro BLE protocol — Nordic UART service, Gadgetbridge-compatible
-private enum FitPro {
-    static let serviceUUID = CBUUID(string: "6e400001-b5a3-f393-e0a9-e50e24dcca9d")
-    static let txCharUUID  = CBUUID(string: "6e400002-b5a3-f393-e0a9-e50e24dcca9d") // write
-    static let rxCharUUID  = CBUUID(string: "6e400003-b5a3-f393-e0a9-e50e24dcca9d") // notify
-
-    // Command groups
-    static let GROUP_GENERAL:      UInt8 = 0x12
-    static let GROUP_REQUEST_DATA: UInt8 = 0x1A
-    static let GROUP_BAND_INFO:    UInt8 = 0x20
-    static let GROUP_BIND:         UInt8 = 0x14
-    static let GROUP_RESET:        UInt8 = 0x1D
-
-    // Notification icon bytes
-    enum Icon: UInt8 {
-        case sms       = 0x01
-        case wechat    = 0x03
-        case facebook  = 0x04
-        case twitter   = 0x05
-        case line      = 0x07
-        case whatsapp  = 0x08
-        case instagram = 0x10
-        case generic   = 0x00
-    }
-
-    // Packet: CD [full_len_hi] [full_len_lo] [group] 01 [cmd] [payload_len_hi] [payload_len_lo] [payload]
-    // full_len = 5 + payload_len
-    static func packet(group: UInt8, cmd: UInt8, payload: [UInt8] = []) -> Data {
-        let pLen = payload.count
-        let fLen = 5 + pLen
-        var bytes: [UInt8] = [
-            0xCD,
-            UInt8((fLen >> 8) & 0xFF), UInt8(fLen & 0xFF),
-            group, 0x01, cmd,
-            UInt8((pLen >> 8) & 0xFF), UInt8(pLen & 0xFF)
-        ]
-        bytes += payload
-        return Data(bytes)
-    }
-
-    // CMD_NOTIFICATION_MESSAGE: group=0x12, cmd=0x12
-    // Format matches Gadgetbridge: icon + 0x00 0x00 + sender SP subject SP body SP, max 250 bytes
-    static func notificationPacket(icon: UInt8, sender: String, subject: String, body: String) -> Data {
-        let raw = Array("\(sender) \(subject) \(body) ".utf8)
-        var payload: [UInt8] = [icon, 0x00, 0x00]
-        payload += raw.prefix(250)
-        return packet(group: GROUP_GENERAL, cmd: 0x12, payload: payload)
-    }
-
-    // CMD_NOTIFICATIONS_ENABLE — group MUST be 0x12, not 0x01
-    static var enableNotificationsPacket: Data {
-        let payload: [UInt8] = [0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1]
-        return packet(group: GROUP_GENERAL, cmd: 0x07, payload: payload)
-    }
-
-    // CMD_UNBIND — sent to factory-reset the bond (group=0x14, cmd=0x00)
-    static var unbindPacket: Data { packet(group: GROUP_BIND, cmd: 0x00) }
+enum ConnectionState: String, Codable {
+    case disconnected = "Disconnected"
+    case connecting   = "Connecting…"
+    case connected    = "Connected"
 }
 
-enum BandConnectionState: String {
-    case idle       = "Not connected"
-    case scanning   = "Scanning..."
-    case connecting = "Connecting..."
-    case connected  = "Connected"
-    case error      = "Error"
+struct BondedDevice: Identifiable, Codable {
+    let id: UUID      // matches CBPeripheral.identifier
+    let name: String  // captured at bond time
+
+    var connectionState: ConnectionState = .disconnected
+
+    private enum CodingKeys: String, CodingKey { case id, name }
 }
 
-class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+class BluetoothManager: NSObject, ObservableObject {
     static let shared = BluetoothManager()
 
-    @Published var connectionState: BandConnectionState = .idle
+    @Published var bondedDevices: [BondedDevice] = []
     @Published var discoveredDevices: [CBPeripheral] = []
-    @Published var connectedDevice: CBPeripheral?
+    @Published var isScanning = false
+    @Published var bluetoothState: CBManagerState = .unknown
 
-    private var centralManager: CBCentralManager!
-    private var writeChar: CBCharacteristic?
-    private let savedDeviceKey = "savedBandIdentifier"
-    private var pendingNotifications: [(appName: String, title: String, body: String)] = []
-    private let mtu = 20
+    private var central: CBCentralManager!
+    private var activePeripherals: [UUID: CBPeripheral] = [:]
+    private let storageKey = "bondedDevices_v1"
 
     override init() {
         super.init()
-        centralManager = CBCentralManager(delegate: self, queue: nil)
+        loadBonded()
+        central = CBCentralManager(delegate: self, queue: nil)
     }
 
     // MARK: - Public API
 
     func startScan() {
-        guard centralManager.state == .poweredOn else { return }
+        guard central.state == .poweredOn else { return }
         discoveredDevices = []
-        connectionState = .scanning
-        // Scan without service-UUID filter — many FitPro bands don't advertise
-        // the Nordic UART UUID in their advertisement packet
-        centralManager.scanForPeripherals(withServices: nil,
-                                          options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+        isScanning = true
+        central.scanForPeripherals(withServices: nil,
+                                   options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
             self?.stopScan()
         }
     }
 
     func stopScan() {
-        centralManager.stopScan()
-        if connectionState == .scanning { connectionState = .idle }
+        central.stopScan()
+        isScanning = false
     }
 
-    func connect(to peripheral: CBPeripheral) {
+    func bond(to peripheral: CBPeripheral) {
         stopScan()
-        connectionState = .connecting
-        // RequiresANCS tells iOS to ensure the connection is ANCS-capable.
-        // The band firmware then subscribes to the iPhone's ANCS GATT service and
-        // receives ALL iOS notifications automatically — no Shortcuts needed.
-        centralManager.connect(peripheral, options: [
-            CBConnectPeripheralOptionRequiresANCS: true
-        ])
+        setConnectionState(peripheral.identifier, .connecting)
+        central.connect(peripheral, options: [CBConnectPeripheralOptionRequiresANCS: true])
     }
 
-    func disconnect() {
-        guard let device = connectedDevice else { return }
-        centralManager.cancelPeripheralConnection(device)
+    func disconnect(id: UUID) {
+        guard let p = activePeripherals[id] else { return }
+        central.cancelPeripheralConnection(p)
     }
 
-    /// Factory-reset the BLE bond. Call this if the band refuses to connect.
-    func unbind() {
-        guard let char = writeChar, let device = connectedDevice else { return }
-        Task { @MainActor in DiagnosticLog.shared.log("Sending UNBIND to band", tag: "BT") }
-        writeChunked(FitPro.unbindPacket, to: device, characteristic: char)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.disconnect()
+    func removeDevice(id: UUID) {
+        disconnect(id: id)
+        bondedDevices.removeAll { $0.id == id }
+        activePeripherals.removeValue(forKey: id)
+        saveBonded()
+    }
+
+    // MARK: - Private
+
+    private func setConnectionState(_ id: UUID, _ state: ConnectionState) {
+        guard let idx = bondedDevices.firstIndex(where: { $0.id == id }) else { return }
+        bondedDevices[idx].connectionState = state
+    }
+
+    private func reconnectAll() {
+        let uuids = bondedDevices.map { $0.id }
+        guard !uuids.isEmpty else { return }
+        let known = central.retrievePeripherals(withIdentifiers: uuids)
+        for p in known { bond(to: p) }
+    }
+
+    private func saveBonded() {
+        if let data = try? JSONEncoder().encode(bondedDevices) {
+            UserDefaults.standard.set(data, forKey: storageKey)
         }
     }
 
-    func sendNotification(appName: String, title: String, body: String) {
-        guard let char = writeChar, let device = connectedDevice,
-              device.state == .connected else {
-            pendingNotifications.append((appName, title, body))
-            return
-        }
-        let icon = iconByte(for: appName)
-        writeChunked(FitPro.notificationPacket(icon: icon, sender: appName, subject: title, body: body),
-                     to: device, characteristic: char)
+    private func loadBonded() {
+        guard let data = UserDefaults.standard.data(forKey: storageKey),
+              let devices = try? JSONDecoder().decode([BondedDevice].self, from: data) else { return }
+        bondedDevices = devices
     }
+}
 
-    // MARK: - Private helpers
+// MARK: - CBCentralManagerDelegate
 
-    private func writeChunked(_ data: Data, to peripheral: CBPeripheral, characteristic: CBCharacteristic) {
-        var offset = data.startIndex
-        while offset < data.endIndex {
-            let end = data.index(offset, offsetBy: mtu, limitedBy: data.endIndex) ?? data.endIndex
-            peripheral.writeValue(data[offset..<end], for: characteristic, type: .withoutResponse)
-            offset = end
-        }
-    }
-
-    /// Gadgetbridge initialization sequence with required 200 ms inter-command delays.
-    private func sendInitSequence(to peripheral: CBPeripheral, char: CBCharacteristic) {
-        Task { @MainActor in DiagnosticLog.shared.log("Sending FitPro init sequence", tag: "BT") }
-
-        var t: TimeInterval = 0.05
-
-        func send(_ data: Data, gap: TimeInterval = 0.2) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak peripheral] in
-                guard let p = peripheral, p.state == .connected else { return }
-                var offset = data.startIndex
-                while offset < data.endIndex {
-                    let end = data.index(offset, offsetBy: 20, limitedBy: data.endIndex) ?? data.endIndex
-                    p.writeValue(data[offset..<end], for: char, type: .withoutResponse)
-                    offset = end
-                }
-            }
-            t += gap
-        }
-
-        // 1. INIT1
-        send(FitPro.packet(group: FitPro.GROUP_GENERAL, cmd: 0x0A, payload: [0x02]))
-
-        // 2. Set time (4-byte big-endian Unix timestamp)
-        let ts = UInt32(Date().timeIntervalSince1970)
-        send(FitPro.packet(group: FitPro.GROUP_GENERAL, cmd: 0x01, payload: [
-            UInt8((ts >> 24) & 0xFF), UInt8((ts >> 16) & 0xFF),
-            UInt8((ts >>  8) & 0xFF), UInt8( ts        & 0xFF)
-        ]))
-
-        // 3. Request INIT1 data
-        send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x0A))
-
-        // 4. Request INIT2 data
-        send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x0C))
-
-        // 5. Set language (0x00 = English)
-        send(FitPro.packet(group: FitPro.GROUP_GENERAL, cmd: 0x15, payload: [0x00]))
-
-        // 6. INIT3
-        send(FitPro.packet(group: FitPro.GROUP_GENERAL, cmd: 0xFF, payload: [0x01]))
-
-        // 7. Request data 0x01
-        send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x01))
-
-        // 8. Request 0x0F
-        send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x0F))
-
-        // 9. Request HW info
-        send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x10))
-
-        // 10. Band info
-        send(FitPro.packet(group: FitPro.GROUP_BAND_INFO, cmd: 0x02))
-
-        // 11. Enable notifications
-        send(FitPro.enableNotificationsPacket)
-
-        // 12. Flush any queued notifications
-        DispatchQueue.main.asyncAfter(deadline: .now() + t + 0.3) { [weak self] in
-            self?.flushPending()
-        }
-    }
-
-    private func flushPending() {
-        let queue = pendingNotifications
-        pendingNotifications = []
-        for item in queue { sendNotification(appName: item.appName, title: item.title, body: item.body) }
-    }
-
-    private func attemptReconnect() {
-        guard let savedId = UserDefaults.standard.string(forKey: savedDeviceKey),
-              let uuid = UUID(uuidString: savedId) else { return }
-        let known = centralManager.retrievePeripherals(withIdentifiers: [uuid])
-        if let peripheral = known.first { connect(to: peripheral) }
-    }
-
-    private func iconByte(for appName: String) -> UInt8 {
-        let l = appName.lowercased()
-        if l.contains("whatsapp")                           { return FitPro.Icon.whatsapp.rawValue }
-        if l.contains("facebook") || l.contains("messenger") { return FitPro.Icon.facebook.rawValue }
-        if l.contains("twitter")  || l.contains("x.com")   { return FitPro.Icon.twitter.rawValue  }
-        if l.contains("instagram")                          { return FitPro.Icon.instagram.rawValue }
-        if l.contains("line")                               { return FitPro.Icon.line.rawValue     }
-        if l.contains("wechat")                             { return FitPro.Icon.wechat.rawValue   }
-        if l.contains("message")  || l.contains("sms")     { return FitPro.Icon.sms.rawValue      }
-        return FitPro.Icon.generic.rawValue
-    }
-
-    // MARK: - CBCentralManagerDelegate
-
+extension BluetoothManager: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        if central.state == .poweredOn { attemptReconnect() }
+        bluetoothState = central.state
+        if central.state == .poweredOn { reconnectAll() }
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
@@ -256,70 +113,26 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        connectedDevice = peripheral
-        connectionState = .connected
-        peripheral.delegate = self
-        peripheral.discoverServices([FitPro.serviceUUID])
-        UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: savedDeviceKey)
-        Task { @MainActor in DiagnosticLog.shared.log("Connected to \(peripheral.name ?? peripheral.identifier.uuidString)", tag: "BT") }
+        activePeripherals[peripheral.identifier] = peripheral
+        if !bondedDevices.contains(where: { $0.id == peripheral.identifier }) {
+            let name = peripheral.name ?? "Device \(peripheral.identifier.uuidString.prefix(4).uppercased())"
+            bondedDevices.append(BondedDevice(id: peripheral.identifier, name: name))
+            saveBonded()
+        }
+        setConnectionState(peripheral.identifier, .connected)
     }
 
-    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        if connectedDevice?.identifier == peripheral.identifier {
-            connectedDevice = nil
-            writeChar = nil
-            connectionState = .idle
-            Task { @MainActor in DiagnosticLog.shared.log("Disconnected from band", tag: "BT") }
-        }
+    func centralManager(_ central: CBCentralManager,
+                        didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        setConnectionState(peripheral.identifier, .disconnected)
     }
 
-    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        connectionState = .error
-        Task { @MainActor in DiagnosticLog.shared.log("Failed to connect: \(error?.localizedDescription ?? "unknown")", tag: "ERROR") }
-    }
-
-    // MARK: - CBPeripheralDelegate
-
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard let services = peripheral.services else { return }
-        Task { @MainActor in
-            DiagnosticLog.shared.log("Discovered \(services.count) services: \(services.map { $0.uuid.uuidString.prefix(8) }.joined(separator: ", "))", tag: "BT")
-        }
-        for service in services {
-            // Discover characteristics for every service so ANCS proxy
-            // characteristics are found if the band exposes them.
-            peripheral.discoverCharacteristics(nil, for: service)
-        }
-    }
-
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        for char in service.characteristics ?? [] {
-            if char.uuid == FitPro.txCharUUID {
-                writeChar = char
-                sendInitSequence(to: peripheral, char: char)
-            } else if char.uuid == FitPro.rxCharUUID {
-                peripheral.setNotifyValue(true, for: char)
-            } else if char.properties.contains(.notify) || char.properties.contains(.indicate) {
-                // Subscribe to any other notifiable characteristic (e.g. ANCS proxy)
-                peripheral.setNotifyValue(true, for: char)
-            }
-        }
-    }
-
-    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard let data = characteristic.value, !data.isEmpty else { return }
-        let bytes = [UInt8](data)
-        // Log raw packets received from the band for diagnostics
-        let hex = bytes.prefix(12).map { String(format: "%02X", $0) }.joined(separator: " ")
-        Task { @MainActor in
-            DiagnosticLog.shared.log("RX [\(characteristic.uuid.uuidString.prefix(8))]: \(hex)\(data.count > 12 ? "…" : "") (\(data.count)B)", tag: "BT")
-        }
-        // Parse FitPro CD-header response packets
-        if bytes.count >= 8, bytes[0] == 0xCD {
-            let group = bytes[3], cmd = bytes[5]
-            Task { @MainActor in
-                DiagnosticLog.shared.log("Band response group=0x\(String(format: "%02X", group)) cmd=0x\(String(format: "%02X", cmd))", tag: "BT")
-            }
-        }
+    func centralManager(_ central: CBCentralManager,
+                        didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        setConnectionState(peripheral.identifier, .disconnected)
     }
 }
+
+// MARK: - CBPeripheralDelegate
+
+extension BluetoothManager: CBPeripheralDelegate {}
