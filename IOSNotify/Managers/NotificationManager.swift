@@ -3,7 +3,7 @@ import UserNotifications
 import Combine
 
 @MainActor
-class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+class NotificationManager: NSObject, ObservableObject, @preconcurrency UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
 
     @Published var authorizationStatus: UNAuthorizationStatus = .notDetermined

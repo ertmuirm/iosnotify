@@ -152,7 +152,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
 
     /// Gadgetbridge initialization sequence with required 200 ms inter-command delays.
     private func sendInitSequence(to peripheral: CBPeripheral, char: CBCharacteristic) {
-        DiagnosticLog.shared.log("Sending FitPro init sequence", tag: "BT")
+        Task { @MainActor in DiagnosticLog.shared.log("Sending FitPro init sequence", tag: "BT") }
 
         var t: TimeInterval = 0.05
 
@@ -256,7 +256,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         peripheral.delegate = self
         peripheral.discoverServices([FitPro.serviceUUID])
         UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: savedDeviceKey)
-        DiagnosticLog.shared.log("Connected to \(peripheral.name ?? peripheral.identifier.uuidString)", tag: "BT")
+        Task { @MainActor in DiagnosticLog.shared.log("Connected to \(peripheral.name ?? peripheral.identifier.uuidString)", tag: "BT") }
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
@@ -264,13 +264,13 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
             connectedDevice = nil
             writeChar = nil
             connectionState = .idle
-            DiagnosticLog.shared.log("Disconnected from band", tag: "BT")
+            Task { @MainActor in DiagnosticLog.shared.log("Disconnected from band", tag: "BT") }
         }
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         connectionState = .error
-        DiagnosticLog.shared.log("Failed to connect: \(error?.localizedDescription ?? "unknown")", tag: "ERROR")
+        Task { @MainActor in DiagnosticLog.shared.log("Failed to connect: \(error?.localizedDescription ?? "unknown")", tag: "ERROR") }
     }
 
     // MARK: - CBPeripheralDelegate
