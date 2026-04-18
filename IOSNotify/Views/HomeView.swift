@@ -62,6 +62,8 @@ struct HomeView: View {
                 infoRow(text: "     select any app → Notification Received")
                 infoRow(text: "  2. Add action: iOS Notify → Log Notification")
                 infoRow(text: "  3. Map Title and Body from the trigger")
+                infoRow(text: "  4. Open the automation → disable")
+                infoRow(text: "     'Ask Before Running' (runs silently)")
                 infoRow(text: "  → Notifications appear in Recent Activity")
                 infoRow(text: "")
                 infoRow(text: "Route B — iOS Notify as trigger source:")
@@ -71,6 +73,7 @@ struct HomeView: View {
                 infoRow(text: "  3. Shortcuts → Automation → + →")
                 infoRow(text: "     Notification Received → iOS Notify")
                 infoRow(text: "  4. Filter title containing [AppName]")
+                infoRow(text: "  5. Disable 'Ask Before Running'")
 
                 Divider().background(Theme.border)
                 Button("Register as Shortcuts trigger (one-time)") {
