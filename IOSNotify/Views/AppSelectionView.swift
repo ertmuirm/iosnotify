@@ -174,7 +174,7 @@ struct AppRow: View {
                 toggleCell(label: "Forward to band", isOn: $app.forwardToBand) {
                     appList.update(app)
                 }
-                Divider().frame(height: 44).background(Theme.border)
+                Divider().frame(height: 32).background(Theme.border)
                 toggleCell(label: "Shortcut trigger", isOn: $app.useAsShortcutTrigger) {
                     appList.update(app)
                 }
@@ -188,18 +188,20 @@ struct AppRow: View {
 
     @ViewBuilder
     private func toggleCell(label: String, isOn: Binding<Bool>, onChange: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        HStack {
             Text(label)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 12))
                 .foregroundColor(Theme.text)
+            Spacer()
             Toggle("", isOn: isOn)
                 .labelsHidden()
                 .tint(Theme.accent)
+                .scaleEffect(0.8)
                 .onChange(of: isOn.wrappedValue) { onChange() }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
     }
 }
 

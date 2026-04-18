@@ -38,7 +38,7 @@ struct HomeView: View {
 
                 HStack {
                     Text("Record notifications")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 12))
                         .foregroundColor(Theme.text)
                     Spacer()
                     Toggle("", isOn: Binding(
@@ -47,8 +47,12 @@ struct HomeView: View {
                     ))
                     .labelsHidden()
                     .tint(Theme.accent)
+                    .scaleEffect(0.8)
                 }
-                .modifier(RowStyle())
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Theme.surface)
+                .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
 
                 Divider().background(Theme.border)
                 Button("Clear all logs and history") { notifMgr.clearHistory() }
