@@ -121,7 +121,7 @@ class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     /// Factory-reset the BLE bond. Call this if the band refuses to connect.
     func unbind() {
         guard let char = writeChar, let device = connectedDevice else { return }
-        DiagnosticLog.shared.log("Sending UNBIND to band", tag: "BT")
+        Task { @MainActor in DiagnosticLog.shared.log("Sending UNBIND to band", tag: "BT") }
         writeChunked(FitPro.unbindPacket, to: device, characteristic: char)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.disconnect()
