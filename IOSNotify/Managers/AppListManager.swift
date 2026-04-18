@@ -8,6 +8,7 @@ struct KnownApp: Identifiable {
     let urlScheme: String    // used with canOpenURL to detect installation
 }
 
+@MainActor
 class AppListManager: ObservableObject {
     static let shared = AppListManager()
 
@@ -60,7 +61,6 @@ class AppListManager: ObservableObject {
 
     // Checks which known apps are installed via URL scheme and pre-populates
     // the list. Existing per-app settings are preserved on re-scan.
-    @MainActor
     func scanInstalled() {
         isScanning = true
         let detected = Self.knownApps.filter {

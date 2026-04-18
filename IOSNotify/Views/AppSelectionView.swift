@@ -48,7 +48,7 @@ struct AppSelectionView: View {
                 .foregroundColor(Theme.dimText)
             Spacer()
             Button(appList.isScanning ? "Scanning..." : "Rescan") {
-                Task { await appList.scanInstalled() }
+                appList.scanInstalled()
             }
             .buttonStyle(ThemedButtonStyle(filled: true))
             .disabled(appList.isScanning)
