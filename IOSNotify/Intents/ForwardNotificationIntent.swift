@@ -1,14 +1,10 @@
 import AppIntents
+import UIKit
 
-// Shortcuts action: call this from a Shortcuts automation whose trigger is
-// "Notification Received from [any third-party app]". The intent logs the
-// notification to iOS Notify's Recent Activity, forwards it to the BLE band
-// (if enabled for that app), and posts a relay notification so the
-// "Notification Received from iOS Notify" Shortcuts trigger fires.
 struct NotificationReceivedIntent: AppIntent {
     static var title: LocalizedStringResource = "Log Notification"
     static var description = IntentDescription(
-        "Logs a notification in iOS Notify, forwards it to your band, and fires the iOS Notify Shortcuts trigger."
+        "Logs a notification in iOS Notify, forwards it to your band, and optionally triggers your Shortcuts automation."
     )
     static var openAppWhenRun: Bool = false
 
@@ -38,7 +34,40 @@ struct NotificationReceivedIntent: AppIntent {
                 body: notifBody
             )
         }
+
+        // For "Run Shortcut (URL)" mode: open the named Shortcut directly.
+        // This fires immediately from the AppIntent process without any user interaction.
+        await openShortcutsURLIfNeeded()
+
         return .result(value: "[\(app.displayName)] \(notifTitle)")
+    }
+
+    private func openShortcutsURLIfNeeded() async {
+        await MainActor.run {
+            let triggerMgr = ShortcutsTriggerManager.shared
+            guard triggerMgr.triggerMode == .shortcutsURL else { return }
+
+            let appList = AppListManager.shared
+            guard let monitored = appList.app(for: app.id),
+                  monitored.useAsShortcutTrigger else { return }
+
+            guard let url = triggerMgr.shortcutsURL(
+                appName: app.displayName,
+                bundleId: app.id,
+                title: notifTitle,
+                body: notifBody
+            ) else {
+                DiagnosticLog.shared.log("shortcutsURL: no shortcut name configured", tag: "TRIGGER")
+                return
+            }
+
+            DiagnosticLog.shared.log("Opening: \(url.absoluteString.prefix(100))", tag: "TRIGGER")
+            UIApplication.shared.open(url, options: [:]) { success in
+                Task { @MainActor in
+                    DiagnosticLog.shared.log("shortcuts:// open result=\(success)", tag: "TRIGGER")
+                }
+            }
+        }
     }
 }
 

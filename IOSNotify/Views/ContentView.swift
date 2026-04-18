@@ -1,7 +1,13 @@
 import SwiftUI
+import MessageUI
 
 struct ContentView: View {
     @State private var selectedTab: Tab = .home
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var triggerMgr = ShortcutsTriggerManager.shared
+
+    @State private var showMessageComposer = false
+    @State private var composerBody = ""
 
     enum Tab: String, CaseIterable {
         case home    = "Home"
@@ -44,18 +50,47 @@ struct ContentView: View {
             Divider().background(Theme.border)
             HStack(spacing: 0) {
                 ForEach(Tab.allCases, id: \.self) { tab in
-                    Button(tab.rawValue) {
-                        selectedTab = tab
-                    }
-                    .font(.system(size: 12, weight: selectedTab == tab ? .bold : .regular, design: .monospaced))
-                    .foregroundColor(selectedTab == tab ? Theme.accent : Theme.dimText)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
+                    Button(tab.rawValue) { selectedTab = tab }
+                        .font(.system(size: 12,
+                                      weight: selectedTab == tab ? .bold : .regular,
+                                      design: .monospaced))
+                        .foregroundColor(selectedTab == tab ? Theme.accent : Theme.dimText)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
                 }
             }
             .background(Theme.surface)
         }
         .background(Theme.background.ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                checkPendingMessages()
+            }
+        }
+        .sheet(isPresented: $showMessageComposer) {
+            if MFMessageComposeViewController.canSendText() {
+                MessageComposerView(
+                    recipients: [triggerMgr.phoneNumber],
+                    body: composerBody
+                ) { sent in
+                    showMessageComposer = false
+                    DiagnosticLog.shared.log("Message sheet dismissed — sent=\(sent)", tag: "TRIGGER")
+                }
+            }
+        }
+    }
+
+    private func checkPendingMessages() {
+        guard triggerMgr.triggerMode == .message,
+              !triggerMgr.phoneNumber.isEmpty,
+              !triggerMgr.pendingMessages.isEmpty,
+              MFMessageComposeViewController.canSendText(),
+              !showMessageComposer,
+              let text = triggerMgr.drainAsText()
+        else { return }
+
+        composerBody = text
+        showMessageComposer = true
     }
 }

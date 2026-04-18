@@ -10,11 +10,11 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
     @Published var recentNotifications: [CapturedNotification] = []
     @Published var isRecording: Bool = true
 
-    private let storageKey = "recentNotifications_v1"
+    private let storageKey  = "recentNotifications_v1"
     private let recordingKey = "isRecording_v1"
-    private let maxStored = 200
+    private let maxStored   = 200
 
-    // Prefix used in relay notification titles so willPresent can skip them.
+    // Prefix used in relay notification identifiers so willPresent can skip them.
     static let relayPrefix = "__iosnotify_relay__"
 
     override init() {
@@ -27,9 +27,9 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
     }
 
     func requestAuthorization() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge, .provisional]) { _, _ in
-            self.refreshStatus()
-        }
+        UNUserNotificationCenter.current().requestAuthorization(
+            options: [.alert, .sound, .badge]
+        ) { _, _ in self.refreshStatus() }
     }
 
     func refreshStatus() {
@@ -51,16 +51,13 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
     }
 
     // Called when app is in foreground and a notification for this app arrives.
-    // Third-party notifications are routed here via the AppIntent → ingest() path,
-    // not directly through this delegate.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         let content = notification.request.content
         DiagnosticLog.shared.log("willPresent: id=\(notification.request.identifier) title=\(content.title.prefix(60))", tag: "NOTIF")
 
-        // Skip relay notifications — they are posted by postShortcutTrigger() and
-        // should never be double-logged as "iOS Notify" activity entries.
+        // Skip relay notifications to avoid double-logging them as "iOS Notify" entries.
         if notification.request.identifier.hasPrefix(Self.relayPrefix) {
             completionHandler([])
             return
@@ -89,13 +86,13 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
     }
 
     // Entry point for all detected notifications.
-    // Called from the Shortcuts AppIntent (ForwardNotificationIntent) for every
-    // third-party notification the user routes via a Shortcuts automation.
+    // Called from the Shortcuts AppIntent (ForwardNotificationIntent) for third-party
+    // notifications the user routes via a Shortcuts automation.
     func ingest(bundleId: String, appName: String, title: String, body: String) {
         DiagnosticLog.shared.log("ingest: bundle=\(bundleId) app=\(appName) title=\(title.prefix(60)) recording=\(isRecording)", tag: "INGEST")
 
-        var captured = CapturedNotification(appBundleId: bundleId, appName: appName, title: title, body: body)
-
+        var captured = CapturedNotification(appBundleId: bundleId, appName: appName,
+                                            title: title, body: body)
         let appList = AppListManager.shared
         DiagnosticLog.shared.log("ingest: monitoredApps count=\(appList.monitoredApps.count)", tag: "INGEST")
 
@@ -107,8 +104,19 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
             }
             if monitored.useAsShortcutTrigger {
                 captured.usedAsShortcutTrigger = true
-                postShortcutTrigger(displayName: monitored.displayName, title: title, body: body)
-                DiagnosticLog.shared.log("ingest: posted shortcut trigger", tag: "INGEST")
+                let triggerMgr = ShortcutsTriggerManager.shared
+                switch triggerMgr.triggerMode {
+                case .message:
+                    if !triggerMgr.phoneNumber.isEmpty {
+                        triggerMgr.enqueue(appName: appName, title: title, body: body)
+                    } else {
+                        DiagnosticLog.shared.log("ingest: message trigger — no phone number set", tag: "INGEST")
+                    }
+                case .shortcutsURL:
+                    // The URL is opened from ForwardNotificationIntent.perform() because
+                    // UIApplication.open() must be called from the active app process, not here.
+                    DiagnosticLog.shared.log("ingest: shortcutsURL mode — will be fired by AppIntent", tag: "INGEST")
+                }
             }
         } else {
             DiagnosticLog.shared.log("ingest: bundle not in monitored list — still logging", tag: "INGEST")
@@ -126,29 +134,19 @@ class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterD
         DiagnosticLog.shared.log("ingest: saved — total=\(recentNotifications.count)", tag: "INGEST")
     }
 
-    // Posts a local notification from iOS Notify so the Shortcuts
-    // "Notification Received → iOS Notify" automation trigger fires.
-    // The relay prefix prevents willPresent from double-logging it.
-    private func postShortcutTrigger(displayName: String, title: String, body: String) {
-        let content = UNMutableNotificationContent()
-        content.title = "[\(displayName)] \(title)"
-        content.body = body
-        let id = Self.relayPrefix + UUID().uuidString
-        UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: id, content: content, trigger: nil)
-        )
-    }
-
-    // Call once so iOS Notify appears in the Shortcuts "Notification Received" trigger list.
-    func sendTestNotification() {
+    // Sends a notification after a 5-second delay so the user has time to background the
+    // app. The notification must arrive while backgrounded for iOS to register iOS Notify
+    // in the Shortcuts "Notification Received" trigger list.
+    func sendRegistrationNotification() {
         let content = UNMutableNotificationContent()
         content.title = "iOS Notify registered"
-        content.body = "Next: iOS Settings → iOS Notify → Notifications → Alert Style: None. Then create your Shortcuts automation."
+        content.body = "iOS Notify will now appear in Shortcuts → Automation → Notification Received."
         content.sound = .default
-        DiagnosticLog.shared.log("sendTestNotification called", tag: "APP")
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 5, repeats: false)
         UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: "iosnotify.test", content: content, trigger: nil)
+            UNNotificationRequest(identifier: "iosnotify.register", content: content, trigger: trigger)
         )
+        DiagnosticLog.shared.log("Registration notification scheduled (5s delay)", tag: "APP")
     }
 
     private func persistHistory() {
