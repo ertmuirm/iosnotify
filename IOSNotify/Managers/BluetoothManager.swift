@@ -430,13 +430,20 @@ extension BluetoothManager: CBPeripheralDelegate {
             if char.properties.contains(.notify) {
                 peripheral.setNotifyValue(true, for: char)
             }
-            // For ANCS devices: attempt to read every readable characteristic.
-            // If any of them require authentication, CoreBluetooth receives
-            // CBATTError.insufficientAuthentication and iOS automatically triggers
-            // the Bluetooth pairing dialog, completing the encrypted bond that
-            // produces the ⓘ icon and "Share System Notifications" toggle.
-            if type.requiresANCS && char.properties.contains(.read) {
-                peripheral.readValue(for: char)
+            // For ANCS devices: trigger the SMP encryption handshake by reading.
+            // Two paths:
+            //   (a) Any char with .read declared — CoreBluetooth raises
+            //       CBATTError.insufficientAuthentication if auth is required,
+            //       which makes iOS show the native pairing dialog automatically.
+            //   (b) Battery Level (2A19) and Model Number (2A24) are read
+            //       unconditionally because L13 / MediaTek / Realtek firmware
+            //       sometimes omits the .read flag in the GATT declaration even
+            //       though these characteristics are protected and respond to reads.
+            if type.requiresANCS {
+                let knownSecure: Set<CBUUID> = [CBUUID(string: "2A19"), CBUUID(string: "2A24")]
+                if char.properties.contains(.read) || knownSecure.contains(char.uuid) {
+                    peripheral.readValue(for: char)
+                }
             }
         }
     }
