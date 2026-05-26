@@ -11,6 +11,11 @@ enum DeviceType: String, Codable, CaseIterable, Identifiable {
 
     // Whether to run the Nordic UART init sequence after connecting
     var sendsInitSequence: Bool { self != .genericAncs }
+
+    // Whether to request an ANCS-capable system bond.
+    // FitPro devices communicate via Nordic UART only and don't benefit from ANCS.
+    // Hryfine and generic ANCS devices should attempt system-level bonding.
+    var requiresANCS: Bool { self != .fitpro }
 }
 
 // MARK: - Notification categories
@@ -113,7 +118,7 @@ enum ConnectionState: String, Codable {
 struct BondedDevice: Identifiable, Codable {
     let id: UUID
     let name: String
-    var deviceType: DeviceType = .fitpro
+    var deviceType: DeviceType = .genericAncs
     var vibrationLevel: Int    = 3   // 0=off, 1=low, 2=medium, 3=high
     var connectionState: ConnectionState = .disconnected
 
@@ -141,14 +146,24 @@ class BluetoothManager: NSObject, ObservableObject {
     private var central: CBCentralManager!
     private var activePeripherals: [UUID: CBPeripheral] = [:]
     private var writeChars: [UUID: CBCharacteristic] = [:]
+    // Device type detected at bond() time, consumed in didConnect before the BondedDevice exists
+    private var pendingDeviceTypes: [UUID: DeviceType] = [:]
 
     private let storageKey       = "bondedDevices_v1"
     private let autoReconnectKey = "autoReconnect_v1"
     private let categoriesKey    = "notifCategories_v1"
 
-    private let connectOptions: [String: Any] = [
-        CBConnectPeripheralOptionRequiresANCS: true
-    ]
+    private func connectOptions(for type: DeviceType) -> [String: Any] {
+        type.requiresANCS ? [CBConnectPeripheralOptionRequiresANCS: true] : [:]
+    }
+
+    // Infer device type from the peripheral's advertised name.
+    private func detectDeviceType(from name: String?) -> DeviceType {
+        let n = name?.lowercased() ?? ""
+        if n.contains("hryfine") || n.contains("hryf") { return .hryfine }
+        if n.contains("fitpro") || n.contains("fit pro") { return .fitpro }
+        return .genericAncs
+    }
 
     override init() {
         autoReconnect   = UserDefaults.standard.object(forKey: "autoReconnect_v1") as? Bool ?? true
@@ -182,8 +197,10 @@ class BluetoothManager: NSObject, ObservableObject {
 
     func bond(to peripheral: CBPeripheral) {
         stopScan()
+        let type = detectDeviceType(from: peripheral.name)
+        pendingDeviceTypes[peripheral.identifier] = type
         setConnectionState(peripheral.identifier, .connecting)
-        central.connect(peripheral, options: connectOptions)
+        central.connect(peripheral, options: connectOptions(for: type))
     }
 
     func disconnect(id: UUID) {
@@ -237,20 +254,23 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func deviceType(for id: UUID) -> DeviceType {
-        bondedDevices.first(where: { $0.id == id })?.deviceType ?? .fitpro
+        bondedDevices.first(where: { $0.id == id })?.deviceType ?? .genericAncs
     }
 
     private func reconnectAll() {
         let uuids = bondedDevices.map { $0.id }
         guard !uuids.isEmpty else { return }
-        for p in central.retrievePeripherals(withIdentifiers: uuids) { bond(to: p) }
+        for p in central.retrievePeripherals(withIdentifiers: uuids) {
+            setConnectionState(p.identifier, .connecting)
+            central.connect(p, options: connectOptions(for: deviceType(for: p.identifier)))
+        }
     }
 
     private func scheduleReconnect(for peripheral: CBPeripheral) {
         guard autoReconnect,
               bondedDevices.contains(where: { $0.id == peripheral.identifier }) else { return }
         setConnectionState(peripheral.identifier, .reconnecting)
-        central.connect(peripheral, options: connectOptions)
+        central.connect(peripheral, options: connectOptions(for: deviceType(for: peripheral.identifier)))
     }
 
     private func writeChunked(_ data: Data, to peripheral: CBPeripheral,
@@ -361,13 +381,16 @@ extension BluetoothManager: CBCentralManagerDelegate {
         peripheral.delegate = self
         if !bondedDevices.contains(where: { $0.id == peripheral.identifier }) {
             let name = peripheral.name ?? "Device \(peripheral.identifier.uuidString.prefix(4).uppercased())"
-            bondedDevices.append(BondedDevice(id: peripheral.identifier, name: name))
+            let type = pendingDeviceTypes.removeValue(forKey: peripheral.identifier)
+                       ?? detectDeviceType(from: peripheral.name)
+            bondedDevices.append(BondedDevice(id: peripheral.identifier, name: name, deviceType: type))
             saveBonded()
         }
         setConnectionState(peripheral.identifier, .connected)
-        if deviceType(for: peripheral.identifier).sendsInitSequence {
-            peripheral.discoverServices([FitPro.serviceUUID])
-        }
+        // Discover all services on every connect.
+        // For ANCS devices this also triggers characteristic subscription below, which causes
+        // many bands to issue a BLE Security Request → iOS creates the system-level bond (ⓘ icon).
+        peripheral.discoverServices(nil)
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -387,18 +410,26 @@ extension BluetoothManager: CBCentralManagerDelegate {
 
 extension BluetoothManager: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        for service in peripheral.services ?? [] where service.uuid == FitPro.serviceUUID {
-            peripheral.discoverCharacteristics([FitPro.txCharUUID, FitPro.rxCharUUID], for: service)
+        for service in peripheral.services ?? [] {
+            peripheral.discoverCharacteristics(nil, for: service)
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        let type = deviceType(for: peripheral.identifier)
         for char in service.characteristics ?? [] {
+            // Nordic UART TX — used for sending commands on FitPro/Hryfine
             if char.uuid == FitPro.txCharUUID {
                 writeChars[peripheral.identifier] = char
-                sendInitSequence(to: peripheral, char: char)
-            } else if char.uuid == FitPro.rxCharUUID {
+                if type.sendsInitSequence {
+                    sendInitSequence(to: peripheral, char: char)
+                }
+            }
+            // Subscribe to every notify characteristic we find.
+            // On many bands this prompts the firmware to issue a BLE Security Request,
+            // which causes iOS to initiate pairing and store a system bond (the ⓘ icon).
+            if char.properties.contains(.notify) {
                 peripheral.setNotifyValue(true, for: char)
             }
         }
