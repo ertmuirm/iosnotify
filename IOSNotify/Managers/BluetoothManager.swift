@@ -421,7 +421,16 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func sendL13Init(to peripheral: CBPeripheral, char: CBCharacteristic) {
-        var t: TimeInterval = 0.05
+        // Method B: bind packet sent immediately with .withResponse (ATT Write Request).
+        // Using .withResponse is critical — it either:
+        //   (a) succeeds and the firmware issues a BLE Security Request → iOS pairing dialog, OR
+        //   (b) fails with CBATTError.insufficientAuthentication, which CoreBluetooth intercepts
+        //       and automatically converts into the iOS pairing dialog.
+        // The .withoutResponse path (ATT Write Command) does not trigger either mechanism.
+        peripheral.writeValue(L13.bindPacket, for: char, type: .withResponse)
+
+        // Delay subsequent commands to allow the pairing handshake to complete (~2 s).
+        var t: TimeInterval = 2.5
         func send(_ data: Data, gap: TimeInterval = 0.2) {
             DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self, weak peripheral] in
                 guard let self, let p = peripheral, p.state == .connected else { return }
@@ -429,10 +438,6 @@ class BluetoothManager: NSObject, ObservableObject {
             }
             t += gap
         }
-        // Bind packet first: tells firmware an iOS device wants to pair.
-        // The watch responds with a BLE Security Request → iOS shows the pairing dialog.
-        send(L13.bindPacket)
-        // Time sync second — without it the watch displays the wrong time.
         send(L13.timeSyncPacket())
         let vib = bondedDevices.first(where: { $0.id == peripheral.identifier })?.vibrationLevel ?? 3
         send(L13.vibrationPacket(level: vib))
@@ -551,10 +556,10 @@ extension BluetoothManager: CBPeripheralDelegate {
             if char.properties.contains(.notify) {
                 peripheral.setNotifyValue(true, for: char)
             }
-            // For ANCS devices: read to trigger SMP encryption handshake.
-            // Battery Level (2A19) and Model Number (2A24) are read unconditionally
-            // because L13 firmware may omit .read from the GATT property flags even
-            // though these characteristics are authentication-gated.
+            // Method A: read Model Number (2A24) and Battery Level (2A19) unconditionally
+            // on ANCS devices. If authentication-gated, CoreBluetooth receives
+            // CBATTError.insufficientAuthentication in didUpdateValueFor and iOS shows
+            // the pairing dialog. All other readable characteristics are also attempted.
             if type.requiresANCS {
                 let knownSecure: Set<CBUUID> = [CBUUID(string: "2A19"), CBUUID(string: "2A24")]
                 if char.properties.contains(.read) || knownSecure.contains(char.uuid) {
@@ -563,4 +568,16 @@ extension BluetoothManager: CBPeripheralDelegate {
             }
         }
     }
+
+    // CoreBluetooth calls this after every .withResponse write.
+    // If the L13 bind characteristic requires authentication, the error is
+    // CBATTError.insufficientAuthentication and iOS automatically shows the
+    // pairing dialog — we do not need to handle it ourselves.
+    func peripheral(_ peripheral: CBPeripheral,
+                    didWriteValueFor characteristic: CBCharacteristic, error: Error?) {}
+
+    // Same mechanism for reads: if any characteristic returns insufficientAuthentication,
+    // iOS intercepts the error and initiates the pairing handshake automatically.
+    func peripheral(_ peripheral: CBPeripheral,
+                    didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {}
 }
