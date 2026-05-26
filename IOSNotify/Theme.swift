@@ -3,7 +3,7 @@ import SwiftUI
 enum Theme {
     static let background = Color(hex: "000000")
     static let text = Color(hex: "FFFFFF")
-    static let accent = Color(hex: "19FFA3")
+    static let accent = Color(hex: "E0E0E0")
     static let surface = Color(hex: "0D0D0D")
     static let border = Color(hex: "2A2A2A")
     static let dimText = Color(hex: "666666")

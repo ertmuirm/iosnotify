@@ -62,20 +62,16 @@ struct DeviceListView: View {
                     isOn: $bt.autoReconnect
                 )
 
-                sectionHeader("HOW IT WORKS")
+                sectionHeader("ANCS SETUP")
 
-                infoRow("Connects with CBConnectPeripheralOptionRequiresANCS so iOS")
-                infoRow("maintains an ANCS-capable BLE bond at the OS level.")
+                infoRow("To receive notifications on your band:")
                 infoRow("")
-                infoRow("For FitPro / Hryfine devices the app also sends the Nordic")
-                infoRow("UART init sequence and CMD_NOTIFICATIONS_ENABLE after each")
-                infoRow("connection so the band knows to display notifications.")
+                infoRow("1. Open iOS Settings → Bluetooth")
+                infoRow("2. Find your device and tap the  ⓘ  icon next to it")
+                infoRow("3. Enable \"Share System Notifications\"")
                 infoRow("")
-                infoRow("Background App Refresh is NOT required — the bluetooth-")
-                infoRow("central background mode handles reconnection independently.")
-                infoRow("")
-                infoRow("Hryfine note: full protocol support may require an auth key.")
-                infoRow("ANCS notifications may still work without it on nRF52 bands.")
+                infoRow("If the  ⓘ  icon is missing, unpair the device in iOS Settings")
+                infoRow("→ Bluetooth first, then use this app to bond again.")
             }
         }
         .background(Theme.background)
@@ -109,7 +105,7 @@ struct DeviceListView: View {
                     bt.disconnect(id: device.id)
                 }
             }
-            actionButton("Remove", color: .red) {
+            actionButton("Remove", color: Theme.dimText) {
                 bt.removeDevice(id: device.id)
             }
             Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
@@ -280,7 +276,7 @@ struct DeviceListView: View {
         switch state {
         case .connected:            return Theme.accent
         case .reconnecting,
-             .connecting:          return Color.orange
+             .connecting:          return Theme.text
         case .disconnected:         return Theme.dimText
         }
     }

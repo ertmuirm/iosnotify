@@ -4,7 +4,7 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("iOS Notify")
+                Text("Notify")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(Theme.text)
                 Spacer()
@@ -24,7 +24,7 @@ struct ContentView: View {
     private var btBadgeInfo: (label: String, color: Color) {
         switch BluetoothManager.shared.bluetoothState {
         case .poweredOn:  return ("BT ON",  Theme.accent)
-        case .poweredOff: return ("BT OFF", .red)
+        case .poweredOff: return ("BT OFF", Theme.dimText)
         default:          return ("BT …",   Theme.dimText)
         }
     }
