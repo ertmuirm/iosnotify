@@ -16,33 +16,33 @@ enum DeviceType: String, Codable, CaseIterable, Identifiable {
 // MARK: - Notification categories
 
 enum NotifCategory: String, CaseIterable, Codable, Identifiable {
-    case sms       = "Messages / SMS"
-    case calls     = "Phone Calls"
-    case wechat    = "WeChat"
-    case qq        = "QQ"
-    case facebook  = "Facebook / Messenger"
-    case twitter   = "Twitter / X"
-    case line      = "Line"
-    case whatsapp  = "WhatsApp"
-    case instagram = "Instagram"
-    case email     = "Email"
-    case generic   = "Other notifications"
+    case sms      = "Messages / SMS"
+    case calls    = "Phone Calls"
+    case wechat   = "WeChat"
+    case qq       = "QQ"
+    case facebook = "Facebook / Messenger"
+    case twitter  = "Twitter / X"
+    case line     = "Line"
+    case whatsapp = "WhatsApp"
+    case outlook  = "Outlook"
+    case email    = "Email"
+    case generic  = "Other"
 
     var id: String { rawValue }
 
     var payloadIndex: Int {
         switch self {
-        case .sms:       return 0
-        case .calls:     return 1
-        case .qq:        return 2
-        case .wechat:    return 3
-        case .facebook:  return 4
-        case .twitter:   return 5
-        case .line:      return 6
-        case .whatsapp:  return 7
-        case .instagram: return 8
-        case .email:     return 9
-        case .generic:   return 10
+        case .sms:      return 0
+        case .calls:    return 1
+        case .qq:       return 2
+        case .wechat:   return 3
+        case .facebook: return 4
+        case .twitter:  return 5
+        case .line:     return 6
+        case .whatsapp: return 7
+        case .outlook:  return 8  // replaces Instagram; Instagram falls through to Other
+        case .email:    return 9
+        case .generic:  return 10
         }
     }
 }
