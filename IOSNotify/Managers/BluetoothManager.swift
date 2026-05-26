@@ -160,7 +160,7 @@ class BluetoothManager: NSObject, ObservableObject {
     // Infer device type from the peripheral's advertised name.
     private func detectDeviceType(from name: String?) -> DeviceType {
         let n = name?.lowercased() ?? ""
-        if n.contains("hryfine") || n.contains("hryf") { return .hryfine }
+        if n.contains("hryfine") || n.contains("hryf") || n == "l13" { return .hryfine }
         if n.contains("fitpro") || n.contains("fit pro") { return .fitpro }
         return .genericAncs
     }
