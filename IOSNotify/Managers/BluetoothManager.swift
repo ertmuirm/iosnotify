@@ -239,15 +239,12 @@ class BluetoothManager: NSObject, ObservableObject {
     private let categoriesKey    = "notifCategories_v1"
 
     private func connectOptions(for type: DeviceType) -> [String: Any] {
-        // CBConnectPeripheralOptionRequiresANCS is only for devices that implement
-        // the ANCS GATT service on their firmware. The L13/Hryfine uses Nordic UART
-        // for notifications, not ANCS. Passing RequiresANCS for a NUS device causes
-        // iOS to handle the connection in an ANCS-specific way that suppresses the
-        // standard SMP bonding handshake the L13 firmware expects.
-        // Hryfine's own app connects with no special options, which lets the L13
-        // firmware issue its Security Request naturally → iOS pairing dialog.
-        guard type == .genericAncs else { return [:] }
-        return [CBConnectPeripheralOptionRequiresANCS: true]
+        switch type {
+        case .hryfine, .genericAncs:
+            return [CBConnectPeripheralOptionRequiresANCS: true]
+        case .fitpro:
+            return [:]
+        }
     }
 
     private func detectDeviceType(from name: String?) -> DeviceType {
