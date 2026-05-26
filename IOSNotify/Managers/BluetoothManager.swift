@@ -240,9 +240,12 @@ class BluetoothManager: NSObject, ObservableObject {
 
     private func connectOptions(for type: DeviceType) -> [String: Any] {
         switch type {
-        case .hryfine, .genericAncs:
+        case .genericAncs:
             return [CBConnectPeripheralOptionRequiresANCS: true]
-        case .fitpro:
+        case .hryfine, .fitpro:
+            // L13/Hryfine uses an unencrypted BLE layer for data only. System-level bond
+            // and "Share System Notifications" come from the separate Classic BT (Hry3.0)
+            // entry that the user pairs manually in iOS Settings → Bluetooth.
             return [:]
         }
     }
