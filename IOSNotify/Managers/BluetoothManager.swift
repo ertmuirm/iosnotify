@@ -240,12 +240,14 @@ class BluetoothManager: NSObject, ObservableObject {
 
     private func connectOptions(for type: DeviceType) -> [String: Any] {
         switch type {
-        case .genericAncs:
+        case .hryfine, .genericAncs:
+            // RequiresANCS does two things:
+            // 1. Tells iOS this connection is for ANCS (enables "Share System Notifications" toggle)
+            // 2. If the peripheral has any encrypted GATT characteristic, iOS shows the
+            //    "Bluetooth Pairing Request" dialog when we subscribe/read/write it
+            //    (ATT_ERR_INSUFFICIENT_AUTHEN → iOS initiates SMP bonding)
             return [CBConnectPeripheralOptionRequiresANCS: true]
-        case .hryfine, .fitpro:
-            // L13/Hryfine uses an unencrypted BLE layer for data only. System-level bond
-            // and "Share System Notifications" come from the separate Classic BT (Hry3.0)
-            // entry that the user pairs manually in iOS Settings → Bluetooth.
+        case .fitpro:
             return [:]
         }
     }
