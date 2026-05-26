@@ -169,6 +169,13 @@ private enum L13 {
         packet(cat: 0x03, cmd: 0x01, payload: [start ? 0x01 : 0x00])
     }
 
+    // Bind — application-layer handshake that tells the watch an iOS device is
+    // trying to pair. The firmware responds by issuing a BLE Security Request,
+    // which causes iOS to show the native pairing dialog and create the system
+    // bond (ⓘ icon + "Share System Notifications" toggle).
+    // Must be sent before any other command. AB 00 03 01 02 01
+    static var bindPacket: Data { packet(cat: 0x01, cmd: 0x02, payload: [0x01]) }
+
     // Time Sync — must be sent on every connection or the watch shows wrong time
     static func timeSyncPacket() -> Data {
         let c = Calendar.current.dateComponents(
@@ -414,7 +421,6 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func sendL13Init(to peripheral: CBPeripheral, char: CBCharacteristic) {
-        // Time sync must be first — without it the watch displays wrong time.
         var t: TimeInterval = 0.05
         func send(_ data: Data, gap: TimeInterval = 0.2) {
             DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self, weak peripheral] in
@@ -423,6 +429,10 @@ class BluetoothManager: NSObject, ObservableObject {
             }
             t += gap
         }
+        // Bind packet first: tells firmware an iOS device wants to pair.
+        // The watch responds with a BLE Security Request → iOS shows the pairing dialog.
+        send(L13.bindPacket)
+        // Time sync second — without it the watch displays the wrong time.
         send(L13.timeSyncPacket())
         let vib = bondedDevices.first(where: { $0.id == peripheral.identifier })?.vibrationLevel ?? 3
         send(L13.vibrationPacket(level: vib))
