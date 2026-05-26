@@ -426,11 +426,17 @@ extension BluetoothManager: CBPeripheralDelegate {
                     sendInitSequence(to: peripheral, char: char)
                 }
             }
-            // Subscribe to every notify characteristic we find.
-            // On many bands this prompts the firmware to issue a BLE Security Request,
-            // which causes iOS to initiate pairing and store a system bond (the ⓘ icon).
+            // Subscribe to every notify characteristic.
             if char.properties.contains(.notify) {
                 peripheral.setNotifyValue(true, for: char)
+            }
+            // For ANCS devices: attempt to read every readable characteristic.
+            // If any of them require authentication, CoreBluetooth receives
+            // CBATTError.insufficientAuthentication and iOS automatically triggers
+            // the Bluetooth pairing dialog, completing the encrypted bond that
+            // produces the ⓘ icon and "Share System Notifications" toggle.
+            if type.requiresANCS && char.properties.contains(.read) {
+                peripheral.readValue(for: char)
             }
         }
     }
