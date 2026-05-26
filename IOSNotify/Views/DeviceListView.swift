@@ -3,6 +3,7 @@ import CoreBluetooth
 
 struct DeviceListView: View {
     @ObservedObject private var bt = BluetoothManager.shared
+    @State private var expandedDeviceId: UUID? = nil
 
     var body: some View {
         ScrollView {
@@ -18,6 +19,9 @@ struct DeviceListView: View {
                 } else {
                     ForEach(bt.bondedDevices) { device in
                         bondedRow(device)
+                        if expandedDeviceId == device.id {
+                            deviceSettingsPanel(device)
+                        }
                     }
                 }
 
@@ -52,58 +56,52 @@ struct DeviceListView: View {
 
                 sectionHeader("SETTINGS")
 
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Auto-reconnect")
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.text)
-                        Text("Reconnect in the background if a bonded device drops")
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.dimText)
-                    }
-                    Spacer()
-                    Toggle("", isOn: $bt.autoReconnect)
-                        .labelsHidden()
-                        .tint(Theme.accent)
-                        .scaleEffect(0.8)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Theme.surface)
-                .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
+                toggleRow(
+                    label: "Auto-reconnect",
+                    subtitle: "Reconnect in the background if a bonded device drops",
+                    isOn: $bt.autoReconnect
+                )
 
                 sectionHeader("HOW IT WORKS")
 
-                infoRow("The app connects using the FitPro Nordic UART protocol and")
-                infoRow("sends a CMD_NOTIFICATIONS_ENABLE command to the band after")
-                infoRow("each connection. The category toggles above control which")
-                infoRow("of the 11 payload bytes are set to 0x01 (on) or 0x00 (off).")
+                infoRow("Connects with CBConnectPeripheralOptionRequiresANCS so iOS")
+                infoRow("maintains an ANCS-capable BLE bond at the OS level.")
                 infoRow("")
-                infoRow("iOS also enables ANCS on the connection so bands with ANCS")
-                infoRow("firmware support receive notifications directly from the OS.")
+                infoRow("For FitPro / Hryfine devices the app also sends the Nordic")
+                infoRow("UART init sequence and CMD_NOTIFICATIONS_ENABLE after each")
+                infoRow("connection so the band knows to display notifications.")
                 infoRow("")
-                infoRow("Compatible devices:")
-                infoRow("  • FitPro-compatible smart bands (Nordic UART)")
-                infoRow("  • Any BLE band that supports ANCS GATT (e.g. Galaxy Watch)")
+                infoRow("Background App Refresh is NOT required — the bluetooth-")
+                infoRow("central background mode handles reconnection independently.")
                 infoRow("")
-                infoRow("Launch the app once to bond. iOS reconnects in the background.")
+                infoRow("Hryfine note: full protocol support may require an auth key.")
+                infoRow("ANCS notifications may still work without it on nRF52 bands.")
             }
         }
         .background(Theme.background)
     }
 
-    // MARK: - Row builders
+    // MARK: - Bonded device row
 
     @ViewBuilder
     private func bondedRow(_ device: BondedDevice) -> some View {
+        let isExpanded = expandedDeviceId == device.id
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(device.name)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(Theme.text)
-                Text(device.connectionState.rawValue)
-                    .font(.system(size: 11))
-                    .foregroundColor(stateColor(device.connectionState))
+                HStack(spacing: 6) {
+                    Text(device.connectionState.rawValue)
+                        .font(.system(size: 11))
+                        .foregroundColor(stateColor(device.connectionState))
+                    Text("·")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.dimText)
+                    Text(device.deviceType.rawValue)
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.dimText)
+                }
             }
             Spacer()
             if device.connectionState == .connected {
@@ -114,9 +112,99 @@ struct DeviceListView: View {
             actionButton("Remove", color: .red) {
                 bt.removeDevice(id: device.id)
             }
+            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                .font(.system(size: 10))
+                .foregroundColor(Theme.dimText)
         }
         .modifier(RowStyle())
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                expandedDeviceId = isExpanded ? nil : device.id
+            }
+        }
     }
+
+    // MARK: - Per-device settings panel
+
+    @ViewBuilder
+    private func deviceSettingsPanel(_ device: BondedDevice) -> some View {
+        VStack(spacing: 0) {
+
+            // Device type picker
+            HStack {
+                Text("Device type")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.text)
+                Spacer()
+                Picker("", selection: Binding(
+                    get: { device.deviceType },
+                    set: { bt.setDeviceType($0, for: device.id) }
+                )) {
+                    ForEach(DeviceType.allCases) { type in
+                        Text(type.rawValue).tag(type)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(Theme.accent)
+                .font(.system(size: 12))
+            }
+            .settingsRow()
+
+            if device.deviceType != .genericAncs {
+
+                // Vibration level slider
+                HStack(spacing: 12) {
+                    Text("Vibration")
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.text)
+                    Slider(
+                        value: Binding<Double>(
+                            get: { Double(device.vibrationLevel) },
+                            set: { bt.setVibrationLevel(Int($0.rounded()), for: device.id) }
+                        ),
+                        in: 0...3, step: 1
+                    )
+                    .tint(Theme.accent)
+                    Text(vibrationLabel(device.vibrationLevel))
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.dimText)
+                        .frame(width: 36, alignment: .trailing)
+                }
+                .settingsRow()
+
+                // Find device button (only when connected)
+                if device.connectionState == .connected {
+                    Button {
+                        bt.findDevice(id: device.id)
+                    } label: {
+                        HStack {
+                            Text("Find Device")
+                                .font(.system(size: 12))
+                                .foregroundColor(Theme.text)
+                            Spacer()
+                            Text("Vibrates 5 s →")
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.accent)
+                        }
+                        .settingsRow()
+                    }
+                }
+            }
+
+            if device.deviceType == .hryfine {
+                Text("Hryfine requires a post-connection auth key not yet publicly documented. ANCS notifications may still work if the band has an nRF52 chip with ANCS firmware.")
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.dimText)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Theme.surface.opacity(0.6))
+                    .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
+            }
+        }
+    }
+
+    // MARK: - Discovered device row
 
     @ViewBuilder
     private func discoveredRow(_ peripheral: CBPeripheral) -> some View {
@@ -147,36 +235,53 @@ struct DeviceListView: View {
         .modifier(RowStyle())
     }
 
+    // MARK: - Notification category row
+
     @ViewBuilder
     private func categoryRow(_ category: NotifCategory) -> some View {
-        let binding = Binding<Bool>(
-            get: { bt.notifCategories[category] ?? true },
-            set: { bt.notifCategories[category] = $0 }
+        toggleRow(
+            label: category.rawValue,
+            isOn: Binding(
+                get: { bt.notifCategories[category] ?? true },
+                set: { bt.notifCategories[category] = $0 }
+            )
         )
+    }
+
+    // MARK: - Generic toggle row
+
+    @ViewBuilder
+    private func toggleRow(label: String, subtitle: String? = nil, isOn: Binding<Bool>) -> some View {
         HStack {
-            Text(category.rawValue)
-                .font(.system(size: 12))
-                .foregroundColor(Theme.text)
+            if let sub = subtitle {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(label).font(.system(size: 12)).foregroundColor(Theme.text)
+                    Text(sub).font(.system(size: 11)).foregroundColor(Theme.dimText)
+                }
+            } else {
+                Text(label).font(.system(size: 12)).foregroundColor(Theme.text)
+            }
             Spacer()
-            Toggle("", isOn: binding)
-                .labelsHidden()
-                .tint(Theme.accent)
-                .scaleEffect(0.8)
+            Toggle("", isOn: isOn).labelsHidden().tint(Theme.accent).scaleEffect(0.8)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.vertical, subtitle != nil ? 8 : 6)
         .background(Theme.surface)
         .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
     }
 
     // MARK: - Helpers
 
+    private func vibrationLabel(_ level: Int) -> String {
+        switch level { case 0: return "Off"; case 1: return "Low"; case 2: return "Med"; default: return "High" }
+    }
+
     private func stateColor(_ state: ConnectionState) -> Color {
         switch state {
-        case .connected:   return Theme.accent
+        case .connected:            return Theme.accent
         case .reconnecting,
-             .connecting:  return Color.orange
-        case .disconnected: return Theme.dimText
+             .connecting:          return Color.orange
+        case .disconnected:         return Theme.dimText
         }
     }
 
@@ -206,5 +311,17 @@ struct DeviceListView: View {
             .foregroundColor(Theme.dimText)
             .padding(.horizontal, 16)
             .padding(.vertical, 2)
+    }
+}
+
+// MARK: - Settings row style helper
+
+private extension View {
+    func settingsRow() -> some View {
+        self
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Theme.surface.opacity(0.6))
+            .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
     }
 }

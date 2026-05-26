@@ -1,6 +1,18 @@
 import Foundation
 import CoreBluetooth
 
+// MARK: - Device type
+
+enum DeviceType: String, Codable, CaseIterable, Identifiable {
+    case fitpro      = "FitPro / compatible"
+    case hryfine     = "Hryfine"
+    case genericAncs = "Generic (ANCS only)"
+    var id: String { rawValue }
+
+    // Whether to run the Nordic UART init sequence after connecting
+    var sendsInitSequence: Bool { self != .genericAncs }
+}
+
 // MARK: - Notification categories
 
 enum NotifCategory: String, CaseIterable, Codable, Identifiable {
@@ -18,7 +30,6 @@ enum NotifCategory: String, CaseIterable, Codable, Identifiable {
 
     var id: String { rawValue }
 
-    // Position in CMD_NOTIFICATIONS_ENABLE 11-byte payload
     var payloadIndex: Int {
         switch self {
         case .sms:       return 0
@@ -36,7 +47,7 @@ enum NotifCategory: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-// MARK: - FitPro BLE protocol
+// MARK: - FitPro / Hryfine BLE protocol (Nordic UART, CD-header)
 
 private enum FitPro {
     static let serviceUUID = CBUUID(string: "6e400001-b5a3-f393-e0a9-e50e24dcca9d")
@@ -62,16 +73,31 @@ private enum FitPro {
         return Data(bytes)
     }
 
-    // CMD_NOTIFICATIONS_ENABLE — 11 bytes, one per category (0x01=on, 0x00=off)
+    // CMD_NOTIFICATIONS_ENABLE (0x07): 11-byte payload, one byte per category
     static func notificationsEnablePacket(enabled: [NotifCategory: Bool]) -> Data {
         var payload = [UInt8](repeating: 0x01, count: 11)
-        for (cat, on) in enabled {
-            payload[cat.payloadIndex] = on ? 0x01 : 0x00
-        }
+        for (cat, on) in enabled { payload[cat.payloadIndex] = on ? 0x01 : 0x00 }
         return packet(group: GROUP_GENERAL, cmd: 0x07, payload: payload)
     }
 
-    // CMD_UNBIND
+    // CMD_SET_DEVICE_VIBRATIONS (0x08): 4-byte payload
+    // Bytes likely: [enable, intensity, duration, pattern] — all 0x01 = high, all 0x00 = off
+    static func vibrationPacket(level: Int) -> Data {
+        let payload: [UInt8]
+        switch level {
+        case 0:  payload = [0x00, 0x00, 0x00, 0x00]
+        case 1:  payload = [0x01, 0x01, 0x00, 0x00]
+        case 2:  payload = [0x01, 0x01, 0x01, 0x00]
+        default: payload = [0x01, 0x01, 0x01, 0x01]
+        }
+        return packet(group: GROUP_GENERAL, cmd: 0x08, payload: payload)
+    }
+
+    // CMD_FIND_BAND (0x0B): single byte — 0x01 start, 0x00 stop
+    static func findBandPacket(start: Bool) -> Data {
+        packet(group: GROUP_GENERAL, cmd: 0x0B, payload: [start ? 0x01 : 0x00])
+    }
+
     static var unbindPacket: Data { packet(group: GROUP_BIND, cmd: 0x00) }
 }
 
@@ -87,8 +113,13 @@ enum ConnectionState: String, Codable {
 struct BondedDevice: Identifiable, Codable {
     let id: UUID
     let name: String
+    var deviceType: DeviceType = .fitpro
+    var vibrationLevel: Int    = 3   // 0=off, 1=low, 2=medium, 3=high
     var connectionState: ConnectionState = .disconnected
-    private enum CodingKeys: String, CodingKey { case id, name }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, deviceType, vibrationLevel
+    }
 }
 
 // MARK: - BluetoothManager
@@ -120,10 +151,12 @@ class BluetoothManager: NSObject, ObservableObject {
     ]
 
     override init() {
-        autoReconnect = UserDefaults.standard.object(forKey: "autoReconnect_v1") as? Bool ?? true
+        autoReconnect   = UserDefaults.standard.object(forKey: "autoReconnect_v1") as? Bool ?? true
         notifCategories = Self.loadCategories()
         super.init()
         loadBonded()
+        // RestoreIdentifierKey lets iOS relaunch the app after termination and resume BLE state.
+        // This works with bluetooth-central background mode and does NOT require Background App Refresh.
         central = CBCentralManager(
             delegate: self,
             queue: nil,
@@ -166,11 +199,45 @@ class BluetoothManager: NSObject, ObservableObject {
         saveBonded()
     }
 
-    // MARK: - Private — state helpers
+    func setDeviceType(_ type: DeviceType, for id: UUID) {
+        guard let idx = bondedDevices.firstIndex(where: { $0.id == id }) else { return }
+        bondedDevices[idx].deviceType = type
+        saveBonded()
+    }
+
+    func setVibrationLevel(_ level: Int, for id: UUID) {
+        guard let idx = bondedDevices.firstIndex(where: { $0.id == id }) else { return }
+        bondedDevices[idx].vibrationLevel = max(0, min(3, level))
+        saveBonded()
+        guard let char = writeChars[id],
+              let p = activePeripherals[id], p.state == .connected,
+              bondedDevices[idx].deviceType.sendsInitSequence else { return }
+        writeChunked(FitPro.vibrationPacket(level: bondedDevices[idx].vibrationLevel),
+                     to: p, characteristic: char)
+    }
+
+    // Triggers a 5-second find-band vibration pulse on the device
+    func findDevice(id: UUID) {
+        guard let char = writeChars[id],
+              let p = activePeripherals[id], p.state == .connected else { return }
+        writeChunked(FitPro.findBandPacket(start: true), to: p, characteristic: char)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self,
+                  let char = self.writeChars[id],
+                  let p = self.activePeripherals[id], p.state == .connected else { return }
+            self.writeChunked(FitPro.findBandPacket(start: false), to: p, characteristic: char)
+        }
+    }
+
+    // MARK: - Private
 
     private func setConnectionState(_ id: UUID, _ state: ConnectionState) {
         guard let idx = bondedDevices.firstIndex(where: { $0.id == id }) else { return }
         bondedDevices[idx].connectionState = state
+    }
+
+    private func deviceType(for id: UUID) -> DeviceType {
+        bondedDevices.first(where: { $0.id == id })?.deviceType ?? .fitpro
     }
 
     private func reconnectAll() {
@@ -186,19 +253,24 @@ class BluetoothManager: NSObject, ObservableObject {
         central.connect(peripheral, options: connectOptions)
     }
 
-    // MARK: - Private — FitPro init
+    private func writeChunked(_ data: Data, to peripheral: CBPeripheral,
+                               characteristic: CBCharacteristic) {
+        var offset = data.startIndex
+        while offset < data.endIndex {
+            let end = data.index(offset, offsetBy: 20, limitedBy: data.endIndex) ?? data.endIndex
+            peripheral.writeValue(data[offset..<end], for: characteristic, type: .withoutResponse)
+            offset = end
+        }
+    }
 
     private func sendInitSequence(to peripheral: CBPeripheral, char: CBCharacteristic) {
+        guard deviceType(for: peripheral.identifier).sendsInitSequence else { return }
+
         var t: TimeInterval = 0.05
         func send(_ data: Data, gap: TimeInterval = 0.2) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak peripheral] in
-                guard let p = peripheral, p.state == .connected else { return }
-                var offset = data.startIndex
-                while offset < data.endIndex {
-                    let end = data.index(offset, offsetBy: 20, limitedBy: data.endIndex) ?? data.endIndex
-                    p.writeValue(data[offset..<end], for: char, type: .withoutResponse)
-                    offset = end
-                }
+            DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self, weak peripheral] in
+                guard let self, let p = peripheral, p.state == .connected else { return }
+                self.writeChunked(data, to: p, characteristic: char)
             }
             t += gap
         }
@@ -213,28 +285,24 @@ class BluetoothManager: NSObject, ObservableObject {
 
         send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x0A))
         send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x0C))
-        send(FitPro.packet(group: FitPro.GROUP_GENERAL, cmd: 0x15, payload: [0x00]))
-        send(FitPro.packet(group: FitPro.GROUP_GENERAL, cmd: 0xFF, payload: [0x01]))
+        send(FitPro.packet(group: FitPro.GROUP_GENERAL,      cmd: 0x15, payload: [0x00]))
+        send(FitPro.packet(group: FitPro.GROUP_GENERAL,      cmd: 0xFF, payload: [0x01]))
         send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x01))
         send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x0F))
         send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x10))
-        send(FitPro.packet(group: FitPro.GROUP_BAND_INFO, cmd: 0x02))
+        send(FitPro.packet(group: FitPro.GROUP_BAND_INFO,    cmd: 0x02))
 
-        // Enable notifications with current per-category settings
+        let vibLevel = bondedDevices.first(where: { $0.id == peripheral.identifier })?.vibrationLevel ?? 3
+        send(FitPro.vibrationPacket(level: vibLevel))
         send(FitPro.notificationsEnablePacket(enabled: notifCategories))
     }
 
-    // Re-send CMD_NOTIFICATIONS_ENABLE to all currently connected devices
     private func resendNotifEnable() {
         for (id, char) in writeChars {
-            guard let p = activePeripherals[id], p.state == .connected else { continue }
-            let data = FitPro.notificationsEnablePacket(enabled: notifCategories)
-            var offset = data.startIndex
-            while offset < data.endIndex {
-                let end = data.index(offset, offsetBy: 20, limitedBy: data.endIndex) ?? data.endIndex
-                p.writeValue(data[offset..<end], for: char, type: .withoutResponse)
-                offset = end
-            }
+            guard let p = activePeripherals[id], p.state == .connected,
+                  deviceType(for: id).sendsInitSequence else { continue }
+            writeChunked(FitPro.notificationsEnablePacket(enabled: notifCategories),
+                         to: p, characteristic: char)
         }
     }
 
@@ -297,18 +365,16 @@ extension BluetoothManager: CBCentralManagerDelegate {
             saveBonded()
         }
         setConnectionState(peripheral.identifier, .connected)
-        // Discover FitPro Nordic UART service to send init + notification-enable
-        peripheral.discoverServices([FitPro.serviceUUID])
+        if deviceType(for: peripheral.identifier).sendsInitSequence {
+            peripheral.discoverServices([FitPro.serviceUUID])
+        }
     }
 
     func centralManager(_ central: CBCentralManager,
                         didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         writeChars.removeValue(forKey: peripheral.identifier)
-        if error != nil {
-            scheduleReconnect(for: peripheral)
-        } else {
-            setConnectionState(peripheral.identifier, .disconnected)
-        }
+        if error != nil { scheduleReconnect(for: peripheral) }
+        else            { setConnectionState(peripheral.identifier, .disconnected) }
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -321,10 +387,8 @@ extension BluetoothManager: CBCentralManagerDelegate {
 
 extension BluetoothManager: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        for service in peripheral.services ?? [] {
-            if service.uuid == FitPro.serviceUUID {
-                peripheral.discoverCharacteristics([FitPro.txCharUUID, FitPro.rxCharUUID], for: service)
-            }
+        for service in peripheral.services ?? [] where service.uuid == FitPro.serviceUUID {
+            peripheral.discoverCharacteristics([FitPro.txCharUUID, FitPro.rxCharUUID], for: service)
         }
     }
 
