@@ -5,16 +5,10 @@ import CoreBluetooth
 
 enum DeviceType: String, Codable, CaseIterable, Identifiable {
     case fitpro      = "FitPro / compatible"
-    case hryfine     = "Hryfine"
+    case hryfine     = "Hryfine / L13"
     case genericAncs = "Generic (ANCS only)"
     var id: String { rawValue }
-
-    // Whether to run the Nordic UART init sequence after connecting
     var sendsInitSequence: Bool { self != .genericAncs }
-
-    // Whether to request an ANCS-capable system bond.
-    // FitPro devices communicate via Nordic UART only and don't benefit from ANCS.
-    // Hryfine and generic ANCS devices should attempt system-level bonding.
     var requiresANCS: Bool { self != .fitpro }
 }
 
@@ -35,6 +29,7 @@ enum NotifCategory: String, CaseIterable, Codable, Identifiable {
 
     var id: String { rawValue }
 
+    // FitPro protocol: index into the 11-byte enable array
     var payloadIndex: Int {
         switch self {
         case .sms:      return 0
@@ -45,65 +40,149 @@ enum NotifCategory: String, CaseIterable, Codable, Identifiable {
         case .twitter:  return 5
         case .line:     return 6
         case .whatsapp: return 7
-        case .outlook:  return 8  // replaces Instagram; Instagram falls through to Other
+        case .outlook:  return 8
         case .email:    return 9
         case .generic:  return 10
         }
     }
+
+    // L13 protocol: bit position in the 32-bit App Push Toggle bitmask
+    var l13Bit: UInt32 {
+        switch self {
+        case .calls:    return 0x00000001
+        case .sms:      return 0x00000002
+        case .wechat:   return 0x00000004
+        case .qq:       return 0x00000008
+        case .facebook: return 0x00000010
+        case .twitter:  return 0x00000020
+        case .whatsapp: return 0x00000040
+        case .outlook:  return 0x00000080  // occupies Instagram's original bit
+        case .email:    return 0x00000100
+        case .line:     return 0x00000200
+        case .generic:  return 0x00000400
+        }
+    }
 }
 
-// MARK: - FitPro / Hryfine BLE protocol (Nordic UART, CD-header)
+// MARK: - Nordic UART Service UUIDs (two common variants)
+
+private enum NUS {
+    // FitPro clone variant (last byte d)
+    static let txChar_v1 = CBUUID(string: "6e400002-b5a3-f393-e0a9-e50e24dcca9d")
+    // Standard NUS / L13 variant (last byte e)
+    static let txChar_v2 = CBUUID(string: "6e400002-b5a3-f393-e0a9-e50e24dcca9e")
+    // Notify characteristics
+    static let rxChar_v1 = CBUUID(string: "6e400003-b5a3-f393-e0a9-e50e24dcca9d")
+    static let rxChar_v2 = CBUUID(string: "6e400003-b5a3-f393-e0a9-e50e24dcca9e")
+
+    static let txCharUUIDs: Set<CBUUID> = [txChar_v1, txChar_v2]
+    static let rxCharUUIDs: Set<CBUUID> = [rxChar_v1, rxChar_v2]
+}
+
+// MARK: - FitPro BLE protocol (CD-header, Nordic UART)
 
 private enum FitPro {
-    static let serviceUUID = CBUUID(string: "6e400001-b5a3-f393-e0a9-e50e24dcca9d")
-    static let txCharUUID  = CBUUID(string: "6e400002-b5a3-f393-e0a9-e50e24dcca9d")
-    static let rxCharUUID  = CBUUID(string: "6e400003-b5a3-f393-e0a9-e50e24dcca9d")
-
     static let GROUP_GENERAL:      UInt8 = 0x12
     static let GROUP_REQUEST_DATA: UInt8 = 0x1A
     static let GROUP_BAND_INFO:    UInt8 = 0x20
     static let GROUP_BIND:         UInt8 = 0x14
 
-    // CD [len_hi] [len_lo] [group] 01 [cmd] [payload_len_hi] [payload_len_lo] [payload...]
+    // CD [len_hi] [len_lo] [group] 01 [cmd] [plen_hi] [plen_lo] [payload...]
     static func packet(group: UInt8, cmd: UInt8, payload: [UInt8] = []) -> Data {
         let pLen = payload.count
         let fLen = 5 + pLen
-        var bytes: [UInt8] = [
-            0xCD,
-            UInt8((fLen >> 8) & 0xFF), UInt8(fLen & 0xFF),
-            group, 0x01, cmd,
-            UInt8((pLen >> 8) & 0xFF), UInt8(pLen & 0xFF)
-        ]
-        bytes += payload
-        return Data(bytes)
+        var b: [UInt8] = [0xCD,
+                          UInt8((fLen >> 8) & 0xFF), UInt8(fLen & 0xFF),
+                          group, 0x01, cmd,
+                          UInt8((pLen >> 8) & 0xFF), UInt8(pLen & 0xFF)]
+        b += payload
+        return Data(b)
     }
 
-    // CMD_NOTIFICATIONS_ENABLE (0x07): 11-byte payload, one byte per category
     static func notificationsEnablePacket(enabled: [NotifCategory: Bool]) -> Data {
         var payload = [UInt8](repeating: 0x01, count: 11)
         for (cat, on) in enabled { payload[cat.payloadIndex] = on ? 0x01 : 0x00 }
         return packet(group: GROUP_GENERAL, cmd: 0x07, payload: payload)
     }
 
-    // CMD_SET_DEVICE_VIBRATIONS (0x08): 4-byte payload
-    // Bytes likely: [enable, intensity, duration, pattern] — all 0x01 = high, all 0x00 = off
     static func vibrationPacket(level: Int) -> Data {
-        let payload: [UInt8]
+        let p: [UInt8]
         switch level {
-        case 0:  payload = [0x00, 0x00, 0x00, 0x00]
-        case 1:  payload = [0x01, 0x01, 0x00, 0x00]
-        case 2:  payload = [0x01, 0x01, 0x01, 0x00]
-        default: payload = [0x01, 0x01, 0x01, 0x01]
+        case 0:  p = [0x00, 0x00, 0x00, 0x00]
+        case 1:  p = [0x01, 0x01, 0x00, 0x00]
+        case 2:  p = [0x01, 0x01, 0x01, 0x00]
+        default: p = [0x01, 0x01, 0x01, 0x01]
         }
-        return packet(group: GROUP_GENERAL, cmd: 0x08, payload: payload)
+        return packet(group: GROUP_GENERAL, cmd: 0x08, payload: p)
     }
 
-    // CMD_FIND_BAND (0x0B): single byte — 0x01 start, 0x00 stop
     static func findBandPacket(start: Bool) -> Data {
         packet(group: GROUP_GENERAL, cmd: 0x0B, payload: [start ? 0x01 : 0x00])
     }
+}
 
-    static var unbindPacket: Data { packet(group: GROUP_BIND, cmd: 0x00) }
+// MARK: - L13 BLE protocol (AB-header, Nordic UART)
+//
+// Frame: AB 00 [LEN] [CAT] [CMD] [PAYLOAD...]
+// LEN = bytes from CAT to end of frame.
+// Packets with 4+ payload bytes append XOR(CAT, CMD, payload...) as checksum,
+// which accounts for the +1 in the documented length values.
+
+private enum L13 {
+    static func packet(cat: UInt8, cmd: UInt8, payload: [UInt8] = []) -> Data {
+        let dataBytes: [UInt8] = [cat, cmd] + payload
+        let needsChecksum = payload.count >= 4
+        let len = UInt8(dataBytes.count + (needsChecksum ? 1 : 0))
+        var result: [UInt8] = [0xAB, 0x00, len] + dataBytes
+        if needsChecksum { result.append(dataBytes.reduce(0, ^)) }
+        return Data(result)
+        // notifications: AB 00 07 02 01 [m3 m2 m1 m0] [XOR]  ✓
+        // time sync:     AB 00 0A 01 01 Y1 Y2 MM DD HH MI SS [XOR]  ✓
+        // vibration:     AB 00 04 04 02 [int] [rep]  ✓
+        // find device:   AB 00 03 03 01 [01/00]  ✓
+    }
+
+    // App Push Toggle — 32-bit bitmask of enabled notification categories
+    static func notificationsPacket(enabled: [NotifCategory: Bool]) -> Data {
+        var mask: UInt32 = 0
+        for (cat, on) in enabled where on { mask |= cat.l13Bit }
+        return packet(cat: 0x02, cmd: 0x01, payload: [
+            UInt8((mask >> 24) & 0xFF), UInt8((mask >> 16) & 0xFF),
+            UInt8((mask >>  8) & 0xFF), UInt8( mask        & 0xFF)
+        ])
+    }
+
+    // Vibration: intensity 00=off…03=high, repeats = pulse count
+    static func vibrationPacket(level: Int) -> Data {
+        let (intensity, repeats): (UInt8, UInt8)
+        switch level {
+        case 0:  (intensity, repeats) = (0x00, 0x00)
+        case 1:  (intensity, repeats) = (0x01, 0x01)
+        case 2:  (intensity, repeats) = (0x02, 0x02)
+        default: (intensity, repeats) = (0x03, 0x03)
+        }
+        return packet(cat: 0x04, cmd: 0x02, payload: [intensity, repeats])
+    }
+
+    // Find Device — triggers vibrate/beep loop on the watch
+    static func findBandPacket(start: Bool) -> Data {
+        packet(cat: 0x03, cmd: 0x01, payload: [start ? 0x01 : 0x00])
+    }
+
+    // Time Sync — must be sent on every connection or the watch shows wrong time
+    static func timeSyncPacket() -> Data {
+        let c = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second], from: Date())
+        let y = c.year ?? 2026
+        return packet(cat: 0x01, cmd: 0x01, payload: [
+            UInt8((y >> 8) & 0xFF), UInt8(y & 0xFF),
+            UInt8(c.month  ?? 1),
+            UInt8(c.day    ?? 1),
+            UInt8(c.hour   ?? 0),
+            UInt8(c.minute ?? 0),
+            UInt8(c.second ?? 0)
+        ])
+    }
 }
 
 // MARK: - Device model
@@ -119,7 +198,7 @@ struct BondedDevice: Identifiable, Codable {
     let id: UUID
     let name: String
     var deviceType: DeviceType = .genericAncs
-    var vibrationLevel: Int    = 3   // 0=off, 1=low, 2=medium, 3=high
+    var vibrationLevel: Int    = 3
     var connectionState: ConnectionState = .disconnected
 
     private enum CodingKeys: String, CodingKey {
@@ -146,7 +225,6 @@ class BluetoothManager: NSObject, ObservableObject {
     private var central: CBCentralManager!
     private var activePeripherals: [UUID: CBPeripheral] = [:]
     private var writeChars: [UUID: CBCharacteristic] = [:]
-    // Device type detected at bond() time, consumed in didConnect before the BondedDevice exists
     private var pendingDeviceTypes: [UUID: DeviceType] = [:]
 
     private let storageKey       = "bondedDevices_v1"
@@ -157,7 +235,6 @@ class BluetoothManager: NSObject, ObservableObject {
         type.requiresANCS ? [CBConnectPeripheralOptionRequiresANCS: true] : [:]
     }
 
-    // Infer device type from the peripheral's advertised name.
     private func detectDeviceType(from name: String?) -> DeviceType {
         let n = name?.lowercased() ?? ""
         if n.contains("hryfine") || n.contains("hryf") || n == "l13" { return .hryfine }
@@ -170,8 +247,6 @@ class BluetoothManager: NSObject, ObservableObject {
         notifCategories = Self.loadCategories()
         super.init()
         loadBonded()
-        // RestoreIdentifierKey lets iOS relaunch the app after termination and resume BLE state.
-        // This works with bluetooth-central background mode and does NOT require Background App Refresh.
         central = CBCentralManager(
             delegate: self,
             queue: nil,
@@ -227,22 +302,30 @@ class BluetoothManager: NSObject, ObservableObject {
         bondedDevices[idx].vibrationLevel = max(0, min(3, level))
         saveBonded()
         guard let char = writeChars[id],
-              let p = activePeripherals[id], p.state == .connected,
-              bondedDevices[idx].deviceType.sendsInitSequence else { return }
-        writeChunked(FitPro.vibrationPacket(level: bondedDevices[idx].vibrationLevel),
-                     to: p, characteristic: char)
+              let p = activePeripherals[id], p.state == .connected else { return }
+        let pkt: Data
+        switch bondedDevices[idx].deviceType {
+        case .hryfine:     pkt = L13.vibrationPacket(level: bondedDevices[idx].vibrationLevel)
+        case .fitpro:      pkt = FitPro.vibrationPacket(level: bondedDevices[idx].vibrationLevel)
+        case .genericAncs: return
+        }
+        write(pkt, to: p, characteristic: char)
     }
 
-    // Triggers a 5-second find-band vibration pulse on the device
     func findDevice(id: UUID) {
         guard let char = writeChars[id],
               let p = activePeripherals[id], p.state == .connected else { return }
-        writeChunked(FitPro.findBandPacket(start: true), to: p, characteristic: char)
+        let (start, stop): (Data, Data)
+        switch deviceType(for: id) {
+        case .hryfine: (start, stop) = (L13.findBandPacket(start: true),  L13.findBandPacket(start: false))
+        default:       (start, stop) = (FitPro.findBandPacket(start: true), FitPro.findBandPacket(start: false))
+        }
+        write(start, to: p, characteristic: char)
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self,
                   let char = self.writeChars[id],
                   let p = self.activePeripherals[id], p.state == .connected else { return }
-            self.writeChunked(FitPro.findBandPacket(start: false), to: p, characteristic: char)
+            self.write(stop, to: p, characteristic: char)
         }
     }
 
@@ -270,39 +353,53 @@ class BluetoothManager: NSObject, ObservableObject {
         guard autoReconnect,
               bondedDevices.contains(where: { $0.id == peripheral.identifier }) else { return }
         setConnectionState(peripheral.identifier, .reconnecting)
-        central.connect(peripheral, options: connectOptions(for: deviceType(for: peripheral.identifier)))
+        central.connect(peripheral,
+                        options: connectOptions(for: deviceType(for: peripheral.identifier)))
     }
 
-    private func writeChunked(_ data: Data, to peripheral: CBPeripheral,
-                               characteristic: CBCharacteristic) {
-        var offset = data.startIndex
-        while offset < data.endIndex {
-            let end = data.index(offset, offsetBy: 20, limitedBy: data.endIndex) ?? data.endIndex
-            peripheral.writeValue(data[offset..<end], for: characteristic, type: .withoutResponse)
-            offset = end
+    // Write to a peripheral; uses .withResponse when the characteristic supports it
+    // so authentication-gated writes trigger the iOS pairing dialog.
+    // Chunks automatically for payloads > 20 bytes (FitPro only in practice).
+    private func write(_ data: Data, to peripheral: CBPeripheral,
+                       characteristic: CBCharacteristic) {
+        if data.count > 20 {
+            var offset = data.startIndex
+            while offset < data.endIndex {
+                let end = data.index(offset, offsetBy: 20, limitedBy: data.endIndex) ?? data.endIndex
+                peripheral.writeValue(data[offset..<end], for: characteristic,
+                                      type: .withoutResponse)
+                offset = end
+            }
+        } else {
+            let type: CBCharacteristicWriteType =
+                characteristic.properties.contains(.write) ? .withResponse : .withoutResponse
+            peripheral.writeValue(data, for: characteristic, type: type)
         }
     }
 
     private func sendInitSequence(to peripheral: CBPeripheral, char: CBCharacteristic) {
-        guard deviceType(for: peripheral.identifier).sendsInitSequence else { return }
+        switch deviceType(for: peripheral.identifier) {
+        case .fitpro:      sendFitProInit(to: peripheral, char: char)
+        case .hryfine:     sendL13Init(to: peripheral, char: char)
+        case .genericAncs: break
+        }
+    }
 
+    private func sendFitProInit(to peripheral: CBPeripheral, char: CBCharacteristic) {
         var t: TimeInterval = 0.05
         func send(_ data: Data, gap: TimeInterval = 0.2) {
             DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self, weak peripheral] in
                 guard let self, let p = peripheral, p.state == .connected else { return }
-                self.writeChunked(data, to: p, characteristic: char)
+                self.write(data, to: p, characteristic: char)
             }
             t += gap
         }
-
         send(FitPro.packet(group: FitPro.GROUP_GENERAL, cmd: 0x0A, payload: [0x02]))
-
         let ts = UInt32(Date().timeIntervalSince1970)
         send(FitPro.packet(group: FitPro.GROUP_GENERAL, cmd: 0x01, payload: [
             UInt8((ts >> 24) & 0xFF), UInt8((ts >> 16) & 0xFF),
             UInt8((ts >>  8) & 0xFF), UInt8( ts        & 0xFF)
         ]))
-
         send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x0A))
         send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x0C))
         send(FitPro.packet(group: FitPro.GROUP_GENERAL,      cmd: 0x15, payload: [0x00]))
@@ -311,18 +408,37 @@ class BluetoothManager: NSObject, ObservableObject {
         send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x0F))
         send(FitPro.packet(group: FitPro.GROUP_REQUEST_DATA, cmd: 0x10))
         send(FitPro.packet(group: FitPro.GROUP_BAND_INFO,    cmd: 0x02))
-
-        let vibLevel = bondedDevices.first(where: { $0.id == peripheral.identifier })?.vibrationLevel ?? 3
-        send(FitPro.vibrationPacket(level: vibLevel))
+        let vib = bondedDevices.first(where: { $0.id == peripheral.identifier })?.vibrationLevel ?? 3
+        send(FitPro.vibrationPacket(level: vib))
         send(FitPro.notificationsEnablePacket(enabled: notifCategories))
+    }
+
+    private func sendL13Init(to peripheral: CBPeripheral, char: CBCharacteristic) {
+        // Time sync must be first — without it the watch displays wrong time.
+        var t: TimeInterval = 0.05
+        func send(_ data: Data, gap: TimeInterval = 0.2) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self, weak peripheral] in
+                guard let self, let p = peripheral, p.state == .connected else { return }
+                self.write(data, to: p, characteristic: char)
+            }
+            t += gap
+        }
+        send(L13.timeSyncPacket())
+        let vib = bondedDevices.first(where: { $0.id == peripheral.identifier })?.vibrationLevel ?? 3
+        send(L13.vibrationPacket(level: vib))
+        send(L13.notificationsPacket(enabled: notifCategories))
     }
 
     private func resendNotifEnable() {
         for (id, char) in writeChars {
-            guard let p = activePeripherals[id], p.state == .connected,
-                  deviceType(for: id).sendsInitSequence else { continue }
-            writeChunked(FitPro.notificationsEnablePacket(enabled: notifCategories),
-                         to: p, characteristic: char)
+            guard let p = activePeripherals[id], p.state == .connected else { continue }
+            let pkt: Data
+            switch deviceType(for: id) {
+            case .fitpro:      pkt = FitPro.notificationsEnablePacket(enabled: notifCategories)
+            case .hryfine:     pkt = L13.notificationsPacket(enabled: notifCategories)
+            case .genericAncs: continue
+            }
+            write(pkt, to: p, characteristic: char)
         }
     }
 
@@ -387,9 +503,6 @@ extension BluetoothManager: CBCentralManagerDelegate {
             saveBonded()
         }
         setConnectionState(peripheral.identifier, .connected)
-        // Discover all services on every connect.
-        // For ANCS devices this also triggers characteristic subscription below, which causes
-        // many bands to issue a BLE Security Request → iOS creates the system-level bond (ⓘ icon).
         peripheral.discoverServices(nil)
     }
 
@@ -419,26 +532,19 @@ extension BluetoothManager: CBPeripheralDelegate {
                     didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         let type = deviceType(for: peripheral.identifier)
         for char in service.characteristics ?? [] {
-            // Nordic UART TX — used for sending commands on FitPro/Hryfine
-            if char.uuid == FitPro.txCharUUID {
+            // NUS write characteristic — matches both UUID variants (9d and 9e)
+            if NUS.txCharUUIDs.contains(char.uuid) {
                 writeChars[peripheral.identifier] = char
-                if type.sendsInitSequence {
-                    sendInitSequence(to: peripheral, char: char)
-                }
+                sendInitSequence(to: peripheral, char: char)
             }
-            // Subscribe to every notify characteristic.
+            // Subscribe to all notify characteristics
             if char.properties.contains(.notify) {
                 peripheral.setNotifyValue(true, for: char)
             }
-            // For ANCS devices: trigger the SMP encryption handshake by reading.
-            // Two paths:
-            //   (a) Any char with .read declared — CoreBluetooth raises
-            //       CBATTError.insufficientAuthentication if auth is required,
-            //       which makes iOS show the native pairing dialog automatically.
-            //   (b) Battery Level (2A19) and Model Number (2A24) are read
-            //       unconditionally because L13 / MediaTek / Realtek firmware
-            //       sometimes omits the .read flag in the GATT declaration even
-            //       though these characteristics are protected and respond to reads.
+            // For ANCS devices: read to trigger SMP encryption handshake.
+            // Battery Level (2A19) and Model Number (2A24) are read unconditionally
+            // because L13 firmware may omit .read from the GATT property flags even
+            // though these characteristics are authentication-gated.
             if type.requiresANCS {
                 let knownSecure: Set<CBUUID> = [CBUUID(string: "2A19"), CBUUID(string: "2A24")]
                 if char.properties.contains(.read) || knownSecure.contains(char.uuid) {

@@ -189,7 +189,7 @@ struct DeviceListView: View {
             }
 
             if device.deviceType == .hryfine {
-                Text("Hryfine requires a post-connection auth key not yet publicly documented. ANCS notifications may still work if the band has an nRF52 chip with ANCS firmware.")
+                Text("Uses the AB-header (L13) protocol. Time sync, vibration level, and notification category mask are sent on every connection.")
                     .font(.system(size: 11))
                     .foregroundColor(Theme.dimText)
                     .padding(.horizontal, 16)
