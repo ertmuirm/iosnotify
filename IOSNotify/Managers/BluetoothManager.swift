@@ -219,10 +219,6 @@ class BluetoothManager: NSObject, ObservableObject {
     @Published var batteryLevel: Int = 0
 
     private var central: CBCentralManager!
-    // Dedicated background serial queue for all CoreBluetooth operations.
-    // All UI-bound @Published updates must be dispatched to DispatchQueue.main.
-    private let btQueue = DispatchQueue(label: "io.iosnotify.ble", qos: .userInteractive)
-
     private var activePeripherals:  [UUID: CBPeripheral]       = [:]
     private var writeChars:         [UUID: CBCharacteristic]   = [:]
     private var pendingDeviceTypes: [UUID: DeviceType]         = [:]
@@ -256,9 +252,10 @@ class BluetoothManager: NSObject, ObservableObject {
         notifCategories = Self.loadCategories()
         super.init()
         loadBonded()
+        // queue: nil → callbacks on main thread, eliminating data races on @Published state
         central = CBCentralManager(
             delegate: self,
-            queue: btQueue,
+            queue: nil,
             options: [CBCentralManagerOptionRestoreIdentifierKey: "io.iosnotify.central"]
         )
     }
@@ -267,13 +264,10 @@ class BluetoothManager: NSObject, ObservableObject {
 
     func startScan() {
         guard central.state == .poweredOn else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.discoveredDevices = []
-            self?.isScanning = true
-        }
-        // Scan for all devices (withServices: nil). Many devices — including the L13 —
-        // do not include their service UUID in the advertisement payload, so filtering
-        // by service UUID would miss them entirely.
+        discoveredDevices = []
+        isScanning = true
+        // withServices: nil — many devices (including L13) don't advertise service UUIDs
+        // in their ad packets, so a service filter would miss them entirely.
         central.scanForPeripherals(withServices: nil,
                                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.stopScan() }
@@ -281,7 +275,7 @@ class BluetoothManager: NSObject, ObservableObject {
 
     func stopScan() {
         central.stopScan()
-        DispatchQueue.main.async { [weak self] in self?.isScanning = false }
+        isScanning = false
     }
 
     func bond(to peripheral: CBPeripheral) {
@@ -289,9 +283,7 @@ class BluetoothManager: NSObject, ObservableObject {
         let type = pendingDeviceTypes[peripheral.identifier]
                    ?? detectDeviceType(from: peripheral.name)
         pendingDeviceTypes[peripheral.identifier] = type
-        DispatchQueue.main.async { [weak self] in
-            self?.setConnectionState(peripheral.identifier, .connecting)
-        }
+        setConnectionState(peripheral.identifier, .connecting)
         central.connect(peripheral, options: connectOptions(for: type))
     }
 
@@ -302,41 +294,31 @@ class BluetoothManager: NSObject, ObservableObject {
 
     func removeDevice(id: UUID) {
         disconnect(id: id)
-        DispatchQueue.main.async { [weak self] in
-            self?.bondedDevices.removeAll { $0.id == id }
-            self?.saveBonded()
-        }
+        bondedDevices.removeAll { $0.id == id }
         activePeripherals.removeValue(forKey: id)
         writeChars.removeValue(forKey: id)
+        saveBonded()
     }
 
     func setDeviceType(_ type: DeviceType, for id: UUID) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let idx = self.bondedDevices.firstIndex(where: { $0.id == id }) else { return }
-            self.bondedDevices[idx].deviceType = type
-            self.saveBonded()
-        }
+        guard let idx = bondedDevices.firstIndex(where: { $0.id == id }) else { return }
+        bondedDevices[idx].deviceType = type
+        saveBonded()
     }
 
     func setVibrationLevel(_ level: Int, for id: UUID) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let idx = self.bondedDevices.firstIndex(where: { $0.id == id }) else { return }
-            self.bondedDevices[idx].vibrationLevel = max(0, min(3, level))
-            self.saveBonded()
+        guard let idx = bondedDevices.firstIndex(where: { $0.id == id }) else { return }
+        bondedDevices[idx].vibrationLevel = max(0, min(3, level))
+        saveBonded()
+        guard let char = writeChars[id],
+              let p = activePeripherals[id], p.state == .connected else { return }
+        let pkt: Data
+        switch bondedDevices[idx].deviceType {
+        case .hryfine:     pkt = L13.vibrationPacket(level: bondedDevices[idx].vibrationLevel)
+        case .fitpro:      pkt = FitPro.vibrationPacket(level: bondedDevices[idx].vibrationLevel)
+        case .genericAncs: return
         }
-        btQueue.async { [weak self] in
-            guard let self,
-                  let char = self.writeChars[id],
-                  let p = self.activePeripherals[id], p.state == .connected else { return }
-            let level = self.bondedDevices.first(where: { $0.id == id })?.vibrationLevel ?? 3
-            let pkt: Data
-            switch self.deviceType(for: id) {
-            case .hryfine:     pkt = L13.vibrationPacket(level: level)
-            case .fitpro:      pkt = FitPro.vibrationPacket(level: level)
-            case .genericAncs: return
-            }
-            self.write(pkt, to: p, characteristic: char)
-        }
+        write(pkt, to: p, characteristic: char)
     }
 
     func findDevice(id: UUID) {
@@ -372,9 +354,7 @@ class BluetoothManager: NSObject, ObservableObject {
         let uuids = bondedDevices.map { $0.id }
         guard !uuids.isEmpty else { return }
         for p in central.retrievePeripherals(withIdentifiers: uuids) {
-            DispatchQueue.main.async { [weak self] in
-                self?.setConnectionState(p.identifier, .connecting)
-            }
+            setConnectionState(p.identifier, .connecting)
             central.connect(p, options: connectOptions(for: deviceType(for: p.identifier)))
         }
     }
@@ -387,8 +367,8 @@ class BluetoothManager: NSObject, ObservableObject {
         // Exponential backoff: 1 s → 2 s → 4 s → 8 s → 16 s → 30 s max
         let delay = min(pow(2.0, Double(attempt)), 30.0)
         reconnectAttempts[id] = attempt + 1
-        DispatchQueue.main.async { [weak self] in self?.setConnectionState(id, .reconnecting) }
-        btQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+        setConnectionState(id, .reconnecting)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
             self.central.connect(peripheral,
                                  options: self.connectOptions(for: self.deviceType(for: id)))
@@ -450,23 +430,39 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func sendL13Init(to peripheral: CBPeripheral, char: CBCharacteristic) {
-        // Handshake written immediately with .withResponse.
-        // If 36F6 requires encryption, iOS intercepts ATT_ERR_INSUFFICIENT_AUTHEN
-        // and shows the Bluetooth Pairing Request dialog automatically.
-        peripheral.writeValue(HryFine.handshakePacket, for: char, type: .withResponse)
+        // Use .withResponse if the characteristic supports it — iOS will surface
+        // ATT_ERR_INSUFFICIENT_AUTHEN as the pairing dialog if 36F6 requires encryption.
+        // Fall back to .withoutResponse so the handshake still reaches the firmware
+        // even if the char only advertises writeWithoutResponse; the firmware can then
+        // issue a BLE Security Request to trigger pairing.
+        let wType: CBCharacteristicWriteType =
+            char.properties.contains(.write) ? .withResponse : .withoutResponse
+        peripheral.writeValue(HryFine.handshakePacket, for: char, type: wType)
 
+        let id = peripheral.identifier
         var t: TimeInterval = 2.5
         func send(_ data: Data, gap: TimeInterval = 0.2) {
             DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self, weak peripheral] in
-                guard let self, let p = peripheral, p.state == .connected else { return }
-                self.write(data, to: p, characteristic: char)
+                guard let self, let p = peripheral, p.state == .connected,
+                      let c = self.writeChars[id] else { return }
+                self.write(data, to: p, characteristic: c)
             }
             t += gap
         }
         send(L13.timeSyncPacket())
-        let vib = bondedDevices.first(where: { $0.id == peripheral.identifier })?.vibrationLevel ?? 3
-        send(L13.vibrationPacket(level: vib))
-        send(L13.notificationsPacket(enabled: notifCategories))
+        // vibration and notification levels read at dispatch time (main queue, bond established)
+        DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self, weak peripheral] in
+            guard let self, let p = peripheral, p.state == .connected,
+                  let c = self.writeChars[id] else { return }
+            let vib = self.bondedDevices.first(where: { $0.id == id })?.vibrationLevel ?? 3
+            self.write(L13.vibrationPacket(level: vib), to: p, characteristic: c)
+        }
+        t += 0.2
+        DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self, weak peripheral] in
+            guard let self, let p = peripheral, p.state == .connected,
+                  let c = self.writeChars[id] else { return }
+            self.write(L13.notificationsPacket(enabled: self.notifCategories), to: p, characteristic: c)
+        }
     }
 
     private func resendNotifEnable() {
@@ -515,7 +511,7 @@ class BluetoothManager: NSObject, ObservableObject {
 
 extension BluetoothManager: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        DispatchQueue.main.async { [weak self] in self?.bluetoothState = central.state }
+        bluetoothState = central.state
         if central.state == .poweredOn { reconnectAll() }
     }
 
@@ -527,17 +523,12 @@ extension BluetoothManager: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        // Detect device type from advertised service UUIDs before connecting
         let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
         if services.contains(HryFine.serviceUUID) {
             pendingDeviceTypes[peripheral.identifier] = .hryfine
         }
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self,
-                  !self.discoveredDevices.contains(where: { $0.identifier == peripheral.identifier })
-            else { return }
-            self.discoveredDevices.append(peripheral)
+        if !discoveredDevices.contains(where: { $0.identifier == peripheral.identifier }) {
+            discoveredDevices.append(peripheral)
         }
     }
 
@@ -545,32 +536,23 @@ extension BluetoothManager: CBCentralManagerDelegate {
         activePeripherals[peripheral.identifier] = peripheral
         peripheral.delegate = self
         reconnectAttempts.removeValue(forKey: peripheral.identifier)
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            if !self.bondedDevices.contains(where: { $0.id == peripheral.identifier }) {
-                let name = peripheral.name
-                    ?? "Device \(peripheral.identifier.uuidString.prefix(4).uppercased())"
-                let type = self.pendingDeviceTypes.removeValue(forKey: peripheral.identifier)
-                           ?? self.detectDeviceType(from: peripheral.name)
-                self.bondedDevices.append(BondedDevice(id: peripheral.identifier, name: name,
-                                                       deviceType: type))
-                self.saveBonded()
-            }
-            self.setConnectionState(peripheral.identifier, .connected)
+        if !bondedDevices.contains(where: { $0.id == peripheral.identifier }) {
+            let name = peripheral.name
+                ?? "Device \(peripheral.identifier.uuidString.prefix(4).uppercased())"
+            let type = pendingDeviceTypes.removeValue(forKey: peripheral.identifier)
+                       ?? detectDeviceType(from: peripheral.name)
+            bondedDevices.append(BondedDevice(id: peripheral.identifier, name: name, deviceType: type))
+            saveBonded()
         }
+        setConnectionState(peripheral.identifier, .connected)
         peripheral.discoverServices(nil)
     }
 
     func centralManager(_ central: CBCentralManager,
                         didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         writeChars.removeValue(forKey: peripheral.identifier)
-        if error != nil {
-            scheduleReconnect(for: peripheral)
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                self?.setConnectionState(peripheral.identifier, .disconnected)
-            }
-        }
+        if error != nil { scheduleReconnect(for: peripheral) }
+        else             { setConnectionState(peripheral.identifier, .disconnected) }
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -590,30 +572,31 @@ extension BluetoothManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        let type = deviceType(for: peripheral.identifier)
         for char in service.characteristics ?? [] {
 
-            // HryFine/L13: 36F6 is the primary write characteristic (phone → watch)
+            // HryFine/L13: 36F6 — dispatch L13 init directly from UUID, not via deviceType()
+            // so there is no race on bondedDevices during a fresh bond.
             if char.uuid == HryFine.txCharUUID && writeChars[peripheral.identifier] == nil {
                 writeChars[peripheral.identifier] = char
-                sendInitSequence(to: peripheral, char: char)
+                sendL13Init(to: peripheral, char: char)
             }
 
-            // FitPro / NUS fallback (only if HryFine char not already found)
+            // FitPro / NUS fallback — only if the HryFine char was not found first
             if NUS.txCharUUIDs.contains(char.uuid) && writeChars[peripheral.identifier] == nil {
                 writeChars[peripheral.identifier] = char
-                sendInitSequence(to: peripheral, char: char)
+                sendFitProInit(to: peripheral, char: char)
             }
 
-            // Subscribe to all notify characteristics.
-            // If any (including 36F5) requires encryption → ATT_ERR_INSUFFICIENT_AUTHEN
-            // → iOS automatically shows the Bluetooth Pairing Request dialog.
+            // Subscribe to all notify characteristics — if any (e.g. 36F5) requires
+            // encryption, CoreBluetooth surfaces ATT_ERR_INSUFFICIENT_AUTHEN and iOS
+            // automatically shows the Bluetooth Pairing Request dialog.
             if char.properties.contains(.notify) {
                 peripheral.setNotifyValue(true, for: char)
             }
 
-            // Read all readable characteristics on ANCS devices.
-            // An auth-required read also triggers the pairing dialog.
+            // Read all readable characteristics for ANCS-capable devices.
+            // An auth-required read is another path that triggers the pairing dialog.
+            let type = deviceType(for: peripheral.identifier)
             if type.requiresANCS {
                 let knownSecure: Set<CBUUID> = [CBUUID(string: "2A19"), CBUUID(string: "2A24")]
                 if char.properties.contains(.read) || knownSecure.contains(char.uuid) {
@@ -646,23 +629,20 @@ extension BluetoothManager: CBPeripheralDelegate {
             switch (header, cmdByte) {
 
             case (0xAB, 0x03):
-                // Heart rate update — HR value at data[2] (0–255 bpm)
+                // Heart rate — HR value at data[2] (0–255 bpm)
                 guard data.count >= 3 else { break }
-                let hr = Int(data[2])
-                DispatchQueue.main.async { [weak self] in self?.heartRate = hr }
+                heartRate = Int(data[2])
 
             case (0xAB, 0x06):
                 // Step count — 4-byte big-endian at data[2...5]
                 guard data.count >= 6 else { break }
-                let steps = Int(data[2]) << 24 | Int(data[3]) << 16
+                stepCount = Int(data[2]) << 24 | Int(data[3]) << 16
                            | Int(data[4]) << 8  | Int(data[5])
-                DispatchQueue.main.async { [weak self] in self?.stepCount = steps }
 
             case (0xAB, 0x04):
                 // Battery level — single byte 0–100 at data[2]
                 guard data.count >= 3 else { break }
-                let pct = Int(data[2])
-                DispatchQueue.main.async { [weak self] in self?.batteryLevel = pct }
+                batteryLevel = Int(data[2])
 
             default:
                 break
