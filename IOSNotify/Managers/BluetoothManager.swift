@@ -271,13 +271,10 @@ class BluetoothManager: NSObject, ObservableObject {
             self?.discoveredDevices = []
             self?.isScanning = true
         }
-        // Filter by known service UUIDs for battery efficiency.
-        // Add nil to the list (or pass nil as withServices) to also find generic ANCS devices.
-        let services: [CBUUID] = [
-            HryFine.serviceUUID,      // L13 / Hryfine
-            NUS.serviceUUID_v1        // FitPro-compatible
-        ]
-        central.scanForPeripherals(withServices: services,
+        // Scan for all devices (withServices: nil). Many devices — including the L13 —
+        // do not include their service UUID in the advertisement payload, so filtering
+        // by service UUID would miss them entirely.
+        central.scanForPeripherals(withServices: nil,
                                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.stopScan() }
     }
@@ -535,14 +532,6 @@ extension BluetoothManager: CBCentralManagerDelegate {
         if services.contains(HryFine.serviceUUID) {
             pendingDeviceTypes[peripheral.identifier] = .hryfine
         }
-
-        // Name-based filter: only surface relevant devices
-        let name = (peripheral.name ?? "").lowercased()
-        let relevant = !services.isEmpty                             // known service UUID
-            || name.contains("l13") || name.contains("hryf")
-            || name.contains("fitpro") || name.contains("watch")
-            || name.contains("band")
-        guard relevant || peripheral.name != nil else { return }
 
         DispatchQueue.main.async { [weak self] in
             guard let self,
