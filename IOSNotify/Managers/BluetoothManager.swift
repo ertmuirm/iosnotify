@@ -219,10 +219,9 @@ class BluetoothManager: NSObject, ObservableObject {
     @Published var batteryLevel: Int = 0
 
     private var central: CBCentralManager!
-    private var activePeripherals:  [UUID: CBPeripheral]       = [:]
-    private var writeChars:         [UUID: CBCharacteristic]   = [:]
-    private var pendingDeviceTypes: [UUID: DeviceType]         = [:]
-    private var reconnectAttempts:  [UUID: Int]                = [:]
+    private var activePeripherals:  [UUID: CBPeripheral]     = [:]
+    private var writeChars:         [UUID: CBCharacteristic] = [:]
+    private var pendingDeviceTypes: [UUID: DeviceType]       = [:]
 
     private let storageKey       = "bondedDevices_v1"
     private let autoReconnectKey = "autoReconnect_v1"
@@ -252,11 +251,13 @@ class BluetoothManager: NSObject, ObservableObject {
         notifCategories = Self.loadCategories()
         super.init()
         loadBonded()
-        // queue: nil → callbacks on main thread, eliminating data races on @Published state
+        // queue: nil → callbacks on main thread, eliminating data races on @Published state.
+        // RestoreIdentifierKey: iOS silently re-launches the app in the background after a
+        // reboot to restore the central manager and resume pending connections.
         central = CBCentralManager(
             delegate: self,
             queue: nil,
-            options: [CBCentralManagerOptionRestoreIdentifierKey: "io.iosnotify.central"]
+            options: [CBCentralManagerOptionRestoreIdentifierKey: "L13WatchRestorer"]
         )
     }
 
@@ -362,17 +363,11 @@ class BluetoothManager: NSObject, ObservableObject {
     private func scheduleReconnect(for peripheral: CBPeripheral) {
         guard autoReconnect,
               bondedDevices.contains(where: { $0.id == peripheral.identifier }) else { return }
-        let id = peripheral.identifier
-        let attempt = reconnectAttempts[id] ?? 0
-        // Exponential backoff: 1 s → 2 s → 4 s → 8 s → 16 s → 30 s max
-        let delay = min(pow(2.0, Double(attempt)), 30.0)
-        reconnectAttempts[id] = attempt + 1
-        setConnectionState(id, .reconnecting)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self else { return }
-            self.central.connect(peripheral,
-                                 options: self.connectOptions(for: self.deviceType(for: id)))
-        }
+        setConnectionState(peripheral.identifier, .reconnecting)
+        // iOS connection requests never time out — calling connect once keeps iOS watching
+        // for the device's address forever and wakes the app as soon as it's in range.
+        central.connect(peripheral,
+                        options: connectOptions(for: deviceType(for: peripheral.identifier)))
     }
 
     // Chunks payloads >20 bytes; uses .withResponse when the characteristic supports it
@@ -535,7 +530,6 @@ extension BluetoothManager: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         activePeripherals[peripheral.identifier] = peripheral
         peripheral.delegate = self
-        reconnectAttempts.removeValue(forKey: peripheral.identifier)
         if !bondedDevices.contains(where: { $0.id == peripheral.identifier }) {
             let name = peripheral.name
                 ?? "Device \(peripheral.identifier.uuidString.prefix(4).uppercased())"
