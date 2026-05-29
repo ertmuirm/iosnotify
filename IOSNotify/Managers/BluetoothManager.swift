@@ -61,15 +61,33 @@ enum NotifCategory: String, CaseIterable, Codable, Identifiable {
 //   UIRequiredDeviceCapabilities       — bluetooth-le
 
 private enum HryFine {
-    static let serviceUUID = CBUUID(string: "0000FEE7-0000-1000-8000-00805F9B34FB")
-    static let txCharUUID  = CBUUID(string: "000036F6-0000-1000-8000-00805F9B34FB") // phone → watch (Write)
-    static let rxCharUUID  = CBUUID(string: "000036F5-0000-1000-8000-00805F9B34FB") // watch → phone (Notify)
+    // Primary service candidates — firmware versions vary on short vs. full UUID
+    static let serviceUUID_3802 = CBUUID(string: "3802")
+    static let serviceUUID_FFE0 = CBUUID(string: "FFE0")
+    static let serviceUUID_FEE7 = CBUUID(string: "0000FEE7-0000-1000-8000-00805F9B34FB")
 
-    // Mandatory handshake: must be written to txCharUUID within 5 s of connection.
-    // If 36F6 requires encryption, iOS receives ATT_ERR_INSUFFICIENT_AUTHEN
-    // and automatically shows the Bluetooth Pairing Request dialog.
-    // Frame: [AB header][length=3][cmd 0x01][payload 0x00][sum checksum 0xAF]
-    static let handshakePacket = Data([0xAB, 0x03, 0x01, 0x00, 0xAF])
+    // Write+Notify char candidates for the primary pairing channel
+    static let charUUID_3803 = CBUUID(string: "3803")
+    static let charUUID_FFE1 = CBUUID(string: "FFE1")
+
+    // Legacy FEE7-path chars (RTL8762DT firmware variant)
+    static let txCharUUID = CBUUID(string: "000036F6-0000-1000-8000-00805F9B34FB") // phone → watch
+    static let rxCharUUID = CBUUID(string: "000036F5-0000-1000-8000-00805F9B34FB") // watch → phone
+
+    // All write-target char UUIDs across firmware variants
+    static let commandCharUUIDs: Set<CBUUID> = [charUUID_3803, charUUID_FFE1, txCharUUID]
+
+    // Forces peripheral to demand an encrypted link → iOS shows Bluetooth Pairing Request dialog
+    static let ancsActivationPacket = Data([0xAB, 0x00, 0x04, 0xFF, 0x21, 0x01, 0x01])
+    // Fallback handshake for FEE7/36F6 firmware path
+    static let handshakePacket      = Data([0xAB, 0x03, 0x01, 0x00, 0xAF])
+}
+
+// MARK: - ANCS service (hosted by iOS, may be proxied by firmware post-bonding)
+
+private enum ANCSService {
+    static let serviceUUID            = CBUUID(string: "7905F431-B5CE-4E99-A40F-4B1E122D00D0")
+    static let notificationSourceUUID = CBUUID(string: "9FBF120D-6301-42D9-8C58-25E699A21DBD")
 }
 
 // MARK: - Nordic UART Service (FitPro-compatible, two UUID suffix variants)
@@ -425,27 +443,26 @@ class BluetoothManager: NSObject, ObservableObject {
     }
 
     private func sendL13Init(to peripheral: CBPeripheral, char: CBCharacteristic) {
-        // Use .withResponse if the characteristic supports it — iOS will surface
-        // ATT_ERR_INSUFFICIENT_AUTHEN as the pairing dialog if 36F6 requires encryption.
-        // Fall back to .withoutResponse so the handshake still reaches the firmware
-        // even if the char only advertises writeWithoutResponse; the firmware can then
-        // issue a BLE Security Request to trigger pairing.
         let wType: CBCharacteristicWriteType =
             char.properties.contains(.write) ? .withResponse : .withoutResponse
         peripheral.writeValue(HryFine.handshakePacket, for: char, type: wType)
+        sendL13Config(to: peripheral, delay: 2.5)
+    }
 
+    // Sends time sync + vibration level + notification mask via the stored writeChar.
+    // Called after handshake (FEE7/36F6 path) or after ANCS activation (3803/FFE1 path).
+    private func sendL13Config(to peripheral: CBPeripheral, delay: TimeInterval) {
         let id = peripheral.identifier
-        var t: TimeInterval = 2.5
-        func send(_ data: Data, gap: TimeInterval = 0.2) {
+        var t = delay
+        func sched(_ data: Data) {
             DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self, weak peripheral] in
                 guard let self, let p = peripheral, p.state == .connected,
                       let c = self.writeChars[id] else { return }
                 self.write(data, to: p, characteristic: c)
             }
-            t += gap
+            t += 0.2
         }
-        send(L13.timeSyncPacket())
-        // vibration and notification levels read at dispatch time (main queue, bond established)
+        sched(L13.timeSyncPacket())
         DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self, weak peripheral] in
             guard let self, let p = peripheral, p.state == .connected,
                   let c = self.writeChars[id] else { return }
@@ -518,8 +535,9 @@ extension BluetoothManager: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
-        if services.contains(HryFine.serviceUUID) {
+        let services = Set(advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? [])
+        let hryServices: Set<CBUUID> = [HryFine.serviceUUID_FEE7, HryFine.serviceUUID_3802, HryFine.serviceUUID_FFE0]
+        if !services.isDisjoint(with: hryServices) {
             pendingDeviceTypes[peripheral.identifier] = .hryfine
         }
         if !discoveredDevices.contains(where: { $0.identifier == peripheral.identifier }) {
@@ -566,30 +584,38 @@ extension BluetoothManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        guard error == nil else { return }
         for char in service.characteristics ?? [] {
 
-            // HryFine/L13: 36F6 — dispatch L13 init directly from UUID, not via deviceType()
-            // so there is no race on bondedDevices during a fresh bond.
+            // HryFine/L13 primary path: 3803 or FFE1 — subscribe + write ANCS activation packet.
+            // The magic packet forces the peripheral to demand an encrypted link;
+            // iOS intercepts the ATT_ERR_INSUFFICIENT_AUTHEN and shows the pairing dialog.
+            if (char.uuid == HryFine.charUUID_3803 || char.uuid == HryFine.charUUID_FFE1)
+                && writeChars[peripheral.identifier] == nil {
+                writeChars[peripheral.identifier] = char
+                peripheral.setNotifyValue(true, for: char)
+                peripheral.writeValue(HryFine.ancsActivationPacket, for: char, type: .withResponse)
+            }
+
+            // HryFine/L13 fallback path: FEE7/36F6 — handshake + init sequence
             if char.uuid == HryFine.txCharUUID && writeChars[peripheral.identifier] == nil {
                 writeChars[peripheral.identifier] = char
                 sendL13Init(to: peripheral, char: char)
             }
 
-            // FitPro / NUS fallback — only if the HryFine char was not found first
+            // FitPro / NUS — only if no HryFine char claimed writeChars first
             if NUS.txCharUUIDs.contains(char.uuid) && writeChars[peripheral.identifier] == nil {
                 writeChars[peripheral.identifier] = char
                 sendFitProInit(to: peripheral, char: char)
             }
 
-            // Subscribe to all notify characteristics — if any (e.g. 36F5) requires
-            // encryption, CoreBluetooth surfaces ATT_ERR_INSUFFICIENT_AUTHEN and iOS
-            // automatically shows the Bluetooth Pairing Request dialog.
+            // Subscribe to all notify characteristics (36F5, ANCS Notification Source, etc.)
             if char.properties.contains(.notify) {
                 peripheral.setNotifyValue(true, for: char)
             }
 
-            // Read all readable characteristics for ANCS-capable devices.
-            // An auth-required read is another path that triggers the pairing dialog.
+            // Read readable characteristics for ANCS-capable devices.
+            // Auth-gated reads surface ATT_ERR_INSUFFICIENT_AUTHEN → pairing dialog.
             let type = deviceType(for: peripheral.identifier)
             if type.requiresANCS {
                 let knownSecure: Set<CBUUID> = [CBUUID(string: "2A19"), CBUUID(string: "2A24")]
@@ -600,14 +626,31 @@ extension BluetoothManager: CBPeripheralDelegate {
         }
     }
 
+    func peripheral(_ peripheral: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
+        // After BLE bonding the device may expose additional services (e.g., ANCS relay).
+        // Rediscover everything so new characteristics are handled.
+        peripheral.discoverServices(nil)
+    }
+
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        // iOS intercepts ATT_ERR_INSUFFICIENT_AUTHEN automatically → pairing dialog
+        guard error == nil else { return }
+        // After the notify subscription on the activation char is confirmed, probe for
+        // the ANCS relay service — it may only appear post-bonding.
+        if characteristic.uuid == HryFine.charUUID_3803 || characteristic.uuid == HryFine.charUUID_FFE1 {
+            peripheral.discoverServices([ANCSService.serviceUUID])
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        // iOS intercepts ATT_ERR_INSUFFICIENT_AUTHEN automatically → pairing dialog
+        guard error == nil else { return }
+        // The ANCS activation write succeeded: bonding is established.
+        // Discover the ANCS relay service and send L13 configuration commands.
+        if characteristic.uuid == HryFine.charUUID_3803 || characteristic.uuid == HryFine.charUUID_FFE1 {
+            peripheral.discoverServices([ANCSService.serviceUUID])
+            sendL13Config(to: peripheral, delay: 0.5)
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
