@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AutomationSettingsView: View {
     @ObservedObject private var mgr = AutomationManager.shared
+    @ObservedObject private var bt  = BluetoothManager.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -33,7 +34,6 @@ struct AutomationSettingsView: View {
                 )
 
                 if mgr.config.isEnabled {
-                    // Shortcut name
                     HStack {
                         Text("Shortcut Name")
                             .font(.system(size: 12))
@@ -48,7 +48,6 @@ struct AutomationSettingsView: View {
                     }
                     .settingsRow()
 
-                    // Status indicator
                     HStack(spacing: 8) {
                         Circle()
                             .fill(mgr.isPlayerRunning ? Theme.accent : Theme.dimText)
@@ -94,10 +93,16 @@ struct AutomationSettingsView: View {
                     conditionBlock(
                         toggle: $mgr.config.focusEnabled,
                         label: "Focus / Do Not Disturb",
-                        subtitle: "Only run while any Focus or DND mode is active"
+                        subtitle: "Only run while any Focus or DND mode is active",
+                        onEnable: { mgr.requestFocusAuthorization() }
                     ) {
-                        if !mgr.focusAuthorized {
-                            infoRow("Focus status access not authorized. Open Settings → Privacy → Focus.")
+                        if mgr.config.focusEnabled && !mgr.focusAuthorized {
+                            infoRow("Tap to authorize: Settings → Privacy & Security → Focus.")
+                                .onTapGesture {
+                                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                                        UIApplication.shared.open(url)
+                                    }
+                                }
                         }
                     }
 
@@ -120,6 +125,7 @@ struct AutomationSettingsView: View {
                                 .textInputAutocapitalization(.never)
                         }
                         .settingsRow()
+                        infoRow("Requires the Wi-Fi Information capability in your provisioning profile.")
                     }
 
                     // 3 · Charging
@@ -147,7 +153,6 @@ struct AutomationSettingsView: View {
                                 .tint(Theme.accent)
                         }
                         .settingsRow()
-
                         HStack {
                             Text("To")
                                 .font(.system(size: 12))
@@ -160,7 +165,6 @@ struct AutomationSettingsView: View {
                                 .tint(Theme.accent)
                         }
                         .settingsRow()
-
                         infoRow("Overnight ranges (e.g. 22:00 → 08:00) are supported.")
                     }
 
@@ -186,19 +190,64 @@ struct AutomationSettingsView: View {
                         }
                         .settingsRow()
                     }
+
+                    // 6 · Bluetooth device connected
+                    conditionBlock(
+                        toggle: $mgr.config.btDeviceEnabled,
+                        label: "Bluetooth Device",
+                        subtitle: "Only run when a specific paired device is connected"
+                    ) {
+                        if bt.bondedDevices.isEmpty {
+                            infoRow("No paired devices. Bond a device in the Devices section first.")
+                        } else {
+                            HStack {
+                                Text("Device")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(Theme.text)
+                                Spacer()
+                                Picker("", selection: Binding<UUID?>(
+                                    get: { mgr.config.btDeviceID },
+                                    set: { mgr.config.btDeviceID = $0 }
+                                )) {
+                                    Text("Select…").tag(UUID?.none)
+                                    ForEach(bt.bondedDevices) { device in
+                                        Text(device.name).tag(device.id as UUID?)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .tint(Theme.accent)
+                                .font(.system(size: 12))
+                            }
+                            .settingsRow()
+
+                            // Show live connection state of the selected device
+                            if let id = mgr.config.btDeviceID,
+                               let device = bt.bondedDevices.first(where: { $0.id == id }) {
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .fill(device.connectionState == .connected
+                                              ? Theme.accent : Theme.dimText)
+                                        .frame(width: 6, height: 6)
+                                    Text("\(device.name): \(device.connectionState.rawValue)")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(device.connectionState == .connected
+                                                         ? Theme.accent : Theme.dimText)
+                                    Spacer()
+                                }
+                                .settingsRow()
+                            }
+                        }
+                    }
                 }
 
                 // ── Setup notes ───────────────────────────────────────────
                 sectionHeader("SETUP NOTES")
 
-                infoRow("1. Create a Shortcut named exactly as entered above.")
-                infoRow("2. Enable \"Allow Running Shortcuts\" in Settings → Shortcuts.")
-                infoRow("3. The background engine only runs while conditions are met,")
-                infoRow("   preserving battery when idle.")
-                infoRow("4. Wi-Fi SSID access requires the Wi-Fi Information entitlement")
-                infoRow("   (provisioning profile). SSID returns nil in Simulator.")
-                infoRow("5. Focus status requires the Focus Status entitlement and")
-                infoRow("   authorization from the user.")
+                infoRow("1. Create a Shortcut in the Shortcuts app named exactly as above.")
+                infoRow("2. The background engine only runs while conditions are met —")
+                infoRow("   it stops automatically to save battery when conditions are not met.")
+                infoRow("3. Focus status and Wi-Fi SSID conditions require additional")
+                infoRow("   entitlements in your Apple Developer provisioning profile.")
 
                 Spacer(minLength: 40)
             }
@@ -214,9 +263,31 @@ struct AutomationSettingsView: View {
         toggle: Binding<Bool>,
         label: String,
         subtitle: String,
+        onEnable: (() -> Void)? = nil,
         @ViewBuilder detail: () -> Detail
     ) -> some View {
-        toggleRow(label: label, subtitle: subtitle, isOn: toggle)
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(label).font(.system(size: 12)).foregroundColor(Theme.text)
+                Text(subtitle).font(.system(size: 11)).foregroundColor(Theme.dimText)
+            }
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { toggle.wrappedValue },
+                set: { newVal in
+                    toggle.wrappedValue = newVal
+                    if newVal { onEnable?() }
+                }
+            ))
+            .labelsHidden()
+            .tint(Theme.accent)
+            .scaleEffect(0.8)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Theme.surface)
+        .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
+
         if toggle.wrappedValue {
             detail()
         }

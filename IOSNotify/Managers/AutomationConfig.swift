@@ -42,6 +42,10 @@ struct AutomationConfig: Codable {
     var orientationEnabled: Bool    = false
     var targetOrientation: TargetOrientation = .faceUp
 
+    // Condition 6 – Bluetooth device connected
+    var btDeviceEnabled: Bool       = false
+    var btDeviceID: UUID?           = nil
+
     // MARK: - Persistence
 
     static let defaultsKey = "automationConfig_v1"

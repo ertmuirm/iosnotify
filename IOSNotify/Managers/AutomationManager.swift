@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Combine
 import Network
 import UIKit
 import Intents
@@ -24,14 +25,18 @@ final class AutomationManager: ObservableObject {
     private var batteryObserver: NSObjectProtocol?
     private var orientationObserver: NSObjectProtocol?
     private var timeTimer: Timer?
+    private var btCancellable: AnyCancellable?
 
     private init() {
         setupBatteryObserver()
         setupOrientationObserver()
         setupWifiMonitor()
+        setupBluetoothObserver()
         setupLockStateListener()
         setupTimeTimer()
-        requestFocusAuthorization()
+        // Focus authorization is only requested lazily when the user enables
+        // that condition in settings — calling it unconditionally in init with
+        // an unprovisioned entitlement kills the process on some profiles.
         reevaluate()
     }
 
@@ -42,6 +47,16 @@ final class AutomationManager: ObservableObject {
             let met = await evaluateConditions()
             conditionsMet = met
             met ? startPersistence() : stopPersistence()
+        }
+    }
+
+    /// Call this when the user first enables the Focus condition.
+    func requestFocusAuthorization() {
+        INFocusStatusCenter.default.requestAuthorization { [weak self] status in
+            Task { @MainActor [weak self] in
+                self?.focusAuthorized = (status == .authorized)
+                self?.reevaluate()
+            }
         }
     }
 
@@ -65,6 +80,8 @@ final class AutomationManager: ObservableObject {
         var results: [Bool] = []
 
         if config.focusEnabled {
+            // Returns nil when the Focus Status entitlement isn't provisioned;
+            // treat as "not focused" so the condition gracefully fails.
             results.append(INFocusStatusCenter.default.focusStatus.isFocused == true)
         }
         if config.wifiEnabled {
@@ -82,6 +99,10 @@ final class AutomationManager: ObservableObject {
         if config.orientationEnabled {
             results.append(matchesOrientation())
         }
+        if config.btDeviceEnabled, let targetID = config.btDeviceID {
+            let device = BluetoothManager.shared.bondedDevices.first { $0.id == targetID }
+            results.append(device?.connectionState == .connected)
+        }
 
         guard !results.isEmpty else { return false }
 
@@ -96,10 +117,9 @@ final class AutomationManager: ObservableObject {
     private func isWithinTimeRange() -> Bool {
         let cal = Calendar.current
         let now = Date()
-        let cur = minuteOfDay(now,                  cal: cal)
+        let cur = minuteOfDay(now,                   cal: cal)
         let s   = minuteOfDay(config.timeRangeStart, cal: cal)
         let e   = minuteOfDay(config.timeRangeEnd,   cal: cal)
-        // Supports overnight ranges (e.g. 22:00 → 08:00)
         return s <= e ? (cur >= s && cur < e) : (cur >= s || cur < e)
     }
 
@@ -119,6 +139,7 @@ final class AutomationManager: ObservableObject {
     }
 
     private func fetchCurrentSSID() async -> String? {
+        // Returns nil when com.apple.developer.networking.wifi-info isn't provisioned.
         await withCheckedContinuation { cont in
             NEHotspotNetwork.fetchCurrent { cont.resume(returning: $0?.ssid) }
         }
@@ -132,8 +153,8 @@ final class AutomationManager: ObservableObject {
             try AVAudioSession.sharedInstance().setCategory(.playback, options: .mixWithOthers)
             try AVAudioSession.sharedInstance().setActive(true)
             let player = try AVAudioPlayer(contentsOf: url)
-            player.numberOfLoops = -1   // loop forever
-            player.volume = 0           // truly silent
+            player.numberOfLoops = -1
+            player.volume = 0
             player.play()
             audioPlayer = player
             isPlayerRunning = true
@@ -153,7 +174,6 @@ final class AutomationManager: ObservableObject {
         isPlayerRunning = false
     }
 
-    // Generates a minimal 1-second mono 8 kHz silent WAV in the temp directory.
     private func silentAudioURL() -> URL? {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("notify_silence.wav")
@@ -164,8 +184,8 @@ final class AutomationManager: ObservableObject {
         func w32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
         func w16(_ v: UInt16) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
 
-        let sr: UInt32  = 8000
-        let dataLen: UInt32 = sr * 2    // 1 s × 16-bit mono
+        let sr: UInt32 = 8000
+        let dataLen: UInt32 = sr * 2
         w("RIFF"); w32(36 + dataLen); w("WAVE")
         w("fmt "); w32(16); w16(1); w16(1)
         w32(sr); w32(sr * 2); w16(2); w16(16)
@@ -176,13 +196,10 @@ final class AutomationManager: ObservableObject {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    // MARK: - Darwin lock-state listener (via ObjC NotifyHelper)
+    // MARK: - Darwin lock-state listener
 
     private func setupLockStateListener() {
-        // NotifyHelper wraps notify_register_dispatch + notify_get_state in ObjC
-        // so notify.h doesn't need to be part of the Swift module.
         NotifyHelper.observeLockState { [weak self] isScreenOn in
-            // Callback is already delivered on the main queue (see NotifyHelper.m)
             guard isScreenOn else { return }
             Task { @MainActor [weak self] in await self?.onScreenTurnedOn() }
         }
@@ -224,19 +241,19 @@ final class AutomationManager: ObservableObject {
         pathMonitor = monitor
     }
 
+    private func setupBluetoothObserver() {
+        // Re-evaluate whenever any BluetoothManager @Published property changes
+        // (connection state, bonded device list, etc.)
+        btCancellable = BluetoothManager.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.reevaluate() }
+            }
+    }
+
     private func setupTimeTimer() {
         timeTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.reevaluate() }
-        }
-    }
-
-    // MARK: - Focus authorization
-
-    private func requestFocusAuthorization() {
-        INFocusStatusCenter.default.requestAuthorization { [weak self] status in
-            Task { @MainActor [weak self] in
-                self?.focusAuthorized = (status == .authorized)
-            }
         }
     }
 }

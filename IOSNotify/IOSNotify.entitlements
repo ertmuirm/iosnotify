@@ -4,9 +4,5 @@
 <dict>
 	<key>com.apple.developer.bluetooth.central</key>
 	<true/>
-	<key>com.apple.developer.focus-status</key>
-	<true/>
-	<key>com.apple.developer.networking.wifi-info</key>
-	<true/>
 </dict>
 </plist>
