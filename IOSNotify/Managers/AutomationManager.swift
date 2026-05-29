@@ -34,9 +34,6 @@ final class AutomationManager: ObservableObject {
         setupBluetoothObserver()
         setupLockStateListener()
         setupTimeTimer()
-        // Focus authorization is only requested lazily when the user enables
-        // that condition in settings — calling it unconditionally in init with
-        // an unprovisioned entitlement kills the process on some profiles.
         reevaluate()
     }
 
@@ -44,13 +41,22 @@ final class AutomationManager: ObservableObject {
 
     func reevaluate() {
         Task {
-            let met = await evaluateConditions()
-            conditionsMet = met
-            met ? startPersistence() : stopPersistence()
+            // Audio lifecycle is tied to the master enable toggle ONLY.
+            // The silent audio loop must run whenever automation is enabled so
+            // that Darwin notifications (screen-on) can wake the app from the
+            // background regardless of whether any condition is currently met.
+            // Conditions exclusively control whether the shortcut fires.
+            if config.isEnabled {
+                startPersistence()
+            } else {
+                stopPersistence()
+            }
+            // Update the UI status indicator (would the shortcut fire right now?).
+            conditionsMet = await evaluateConditions()
         }
     }
 
-    /// Call this when the user first enables the Focus condition.
+    /// Call this the first time the Focus condition is enabled in settings.
     func requestFocusAuthorization() {
         INFocusStatusCenter.default.requestAuthorization { [weak self] status in
             Task { @MainActor [weak self] in
@@ -81,7 +87,7 @@ final class AutomationManager: ObservableObject {
 
         if config.focusEnabled {
             // Returns nil when the Focus Status entitlement isn't provisioned;
-            // treat as "not focused" so the condition gracefully fails.
+            // treat nil as "not focused" (condition not met).
             results.append(INFocusStatusCenter.default.focusStatus.isFocused == true)
         }
         if config.wifiEnabled {
@@ -104,7 +110,8 @@ final class AutomationManager: ObservableObject {
             results.append(device?.connectionState == .connected)
         }
 
-        guard !results.isEmpty else { return false }
+        // No conditions enabled = automation is unconditional: always fire.
+        guard !results.isEmpty else { return true }
 
         switch config.matchStrategy {
         case .all: return results.allSatisfy { $0 }
@@ -139,7 +146,6 @@ final class AutomationManager: ObservableObject {
     }
 
     private func fetchCurrentSSID() async -> String? {
-        // Returns nil when com.apple.developer.networking.wifi-info isn't provisioned.
         await withCheckedContinuation { cont in
             NEHotspotNetwork.fetchCurrent { cont.resume(returning: $0?.ssid) }
         }
@@ -154,7 +160,10 @@ final class AutomationManager: ObservableObject {
             try AVAudioSession.sharedInstance().setActive(true)
             let player = try AVAudioPlayer(contentsOf: url)
             player.numberOfLoops = -1
-            player.volume = 0
+            // Use a barely-audible volume rather than exactly zero.
+            // Some iOS versions optimise away true-zero audio, which can
+            // allow the system to suspend the playback session unexpectedly.
+            player.volume = 0.001
             player.play()
             audioPlayer = player
             isPlayerRunning = true
@@ -196,16 +205,20 @@ final class AutomationManager: ObservableObject {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    // MARK: - Darwin lock-state listener
+    // MARK: - Screen-on listener
 
     private func setupLockStateListener() {
-        NotifyHelper.observeLockState { [weak self] isScreenOn in
-            guard isScreenOn else { return }
+        // NotifyHelper registers for both "com.apple.iokit.hid.displayStatus"
+        // (fires on any screen wake, including locked screen) and
+        // "com.apple.springboard.lockstate" (fires on unlock).  The two signals
+        // together cover every "screen became visible" scenario.
+        NotifyHelper.observeScreenOn { [weak self] in
             Task { @MainActor [weak self] in await self?.onScreenTurnedOn() }
         }
     }
 
     private func onScreenTurnedOn() async {
+        guard config.isEnabled else { return }
         let met = await evaluateConditions()
         guard met else { return }
         triggerShortcut()
@@ -242,8 +255,6 @@ final class AutomationManager: ObservableObject {
     }
 
     private func setupBluetoothObserver() {
-        // Re-evaluate whenever any BluetoothManager @Published property changes
-        // (connection state, bonded device list, etc.)
         btCancellable = BluetoothManager.shared.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in

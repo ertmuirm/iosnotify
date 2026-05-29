@@ -2,12 +2,13 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-typedef void (^LockStateHandler)(BOOL screenIsOn);
-
-/// Wraps notify_register_dispatch so Swift can observe the screen lock state
-/// without needing notify.h in the Swift module directly.
 @interface NotifyHelper : NSObject
-+ (void)observeLockStateWithHandler:(LockStateHandler)handler;
+
+/// Calls handler whenever the display turns on — covers both locked-screen wakes
+/// (display power-state notification) and unlock events (springboard lockstate).
+/// Duplicate fires within 1.5 s are coalesced to prevent double-triggering.
++ (void)observeScreenOnWithHandler:(dispatch_block_t)handler;
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -244,10 +244,16 @@ struct AutomationSettingsView: View {
                 sectionHeader("SETUP NOTES")
 
                 infoRow("1. Create a Shortcut in the Shortcuts app named exactly as above.")
-                infoRow("2. The background engine only runs while conditions are met —")
-                infoRow("   it stops automatically to save battery when conditions are not met.")
-                infoRow("3. Focus status and Wi-Fi SSID conditions require additional")
-                infoRow("   entitlements in your Apple Developer provisioning profile.")
+                infoRow("2. While automation is enabled the background audio engine runs")
+                infoRow("   continuously so screen-on events can be detected even from the")
+                infoRow("   lock screen. It stops only when automation is disabled.")
+                infoRow("3. Conditions control WHEN the shortcut fires, not when the engine")
+                infoRow("   runs. With no conditions enabled, the shortcut fires on every")
+                infoRow("   screen wake.")
+                infoRow("4. Focus condition requires the 'Focus Status' capability added to")
+                infoRow("   your provisioning profile in the Apple Developer portal.")
+                infoRow("5. Wi-Fi SSID condition requires the 'Access WiFi Information'")
+                infoRow("   capability in your provisioning profile.")
 
                 Spacer(minLength: 40)
             }
