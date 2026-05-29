@@ -313,14 +313,3 @@ struct DeviceListView: View {
     }
 }
 
-// MARK: - Settings row style helper
-
-private extension View {
-    func settingsRow() -> some View {
-        self
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Theme.surface.opacity(0.6))
-            .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
-    }
-}

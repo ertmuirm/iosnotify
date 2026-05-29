@@ -40,6 +40,17 @@ struct ThemedButtonStyle: ButtonStyle {
     }
 }
 
+// Used by both DeviceListView and AutomationSettingsView for per-row settings panels.
+extension View {
+    func settingsRow() -> some View {
+        self
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Theme.surface.opacity(0.6))
+            .overlay(Rectangle().frame(height: 1).foregroundColor(Theme.border), alignment: .bottom)
+    }
+}
+
 struct RowStyle: ViewModifier {
     func body(content: Content) -> some View {
         content

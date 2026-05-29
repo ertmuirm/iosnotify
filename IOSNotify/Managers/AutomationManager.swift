@@ -19,7 +19,6 @@ final class AutomationManager: ObservableObject {
     @Published var focusAuthorized = false
 
     private var audioPlayer: AVAudioPlayer?
-    private var lockToken: Int32 = -1
     private var pathMonitor: NWPathMonitor?
     private let monitorQueue = DispatchQueue(label: "notify.wifi.monitor", qos: .utility)
     private var batteryObserver: NSObjectProtocol?
@@ -38,8 +37,6 @@ final class AutomationManager: ObservableObject {
 
     // MARK: - Public
 
-    // Called by settings view after any config mutation that bypasses the didSet
-    // (e.g., direct property writes via bindings already trigger didSet).
     func reevaluate() {
         Task {
             let met = await evaluateConditions()
@@ -54,7 +51,6 @@ final class AutomationManager: ObservableObject {
               let url = URL(string: "shortcuts://run-shortcut?name=\(encoded)")
         else { return }
 
-        // Wrap in a background task to maximise execution time from suspended state.
         let taskID = UIApplication.shared.beginBackgroundTask(expirationHandler: nil)
         UIApplication.shared.open(url, options: [:]) { _ in
             UIApplication.shared.endBackgroundTask(taskID)
@@ -72,7 +68,7 @@ final class AutomationManager: ObservableObject {
             results.append(INFocusStatusCenter.default.focusStatus.isFocused == true)
         }
         if config.wifiEnabled {
-            let ssid = await fetchCurrentSSID()
+            let ssid   = await fetchCurrentSSID()
             let target = config.wifiSSID.trimmingCharacters(in: .whitespaces)
             results.append(!target.isEmpty && ssid?.lowercased() == target.lowercased())
         }
@@ -95,15 +91,15 @@ final class AutomationManager: ObservableObject {
         }
     }
 
-    // MARK: - Individual condition checks
+    // MARK: - Individual condition helpers
 
     private func isWithinTimeRange() -> Bool {
         let cal = Calendar.current
         let now = Date()
-        let cur = minuteOfDay(now,     cal: cal)
+        let cur = minuteOfDay(now,                  cal: cal)
         let s   = minuteOfDay(config.timeRangeStart, cal: cal)
         let e   = minuteOfDay(config.timeRangeEnd,   cal: cal)
-        // Handle overnight ranges (e.g. 22:00 – 08:00)
+        // Supports overnight ranges (e.g. 22:00 → 08:00)
         return s <= e ? (cur >= s && cur < e) : (cur >= s || cur < e)
     }
 
@@ -157,7 +153,7 @@ final class AutomationManager: ObservableObject {
         isPlayerRunning = false
     }
 
-    // Generates a 1-second mono 8 kHz silent WAV in the temp directory.
+    // Generates a minimal 1-second mono 8 kHz silent WAV in the temp directory.
     private func silentAudioURL() -> URL? {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("notify_silence.wav")
@@ -168,35 +164,28 @@ final class AutomationManager: ObservableObject {
         func w32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
         func w16(_ v: UInt16) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
 
-        let sr: UInt32  = 8000          // 8 kHz, mono, 16-bit
-        let dataLen: UInt32 = sr * 2    // 1 second × 2 bytes/sample
+        let sr: UInt32  = 8000
+        let dataLen: UInt32 = sr * 2    // 1 s × 16-bit mono
         w("RIFF"); w32(36 + dataLen); w("WAVE")
-        w("fmt "); w32(16); w16(1); w16(1)      // PCM, 1 ch
-        w32(sr); w32(sr * 2); w16(2); w16(16)   // byte rates, block align, bps
+        w("fmt "); w32(16); w16(1); w16(1)
+        w32(sr); w32(sr * 2); w16(2); w16(16)
         w("data"); w32(dataLen)
-        d.append(Data(count: Int(dataLen)))     // silence
+        d.append(Data(count: Int(dataLen)))
 
         try? d.write(to: url)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    // MARK: - Darwin lock-state listener
+    // MARK: - Darwin lock-state listener (via ObjC NotifyHelper)
 
     private func setupLockStateListener() {
-        // state == 0: display turning ON  |  state == 1: display turning OFF / locked
-        var token: Int32 = -1
-        notify_register_dispatch(
-            "com.apple.springboard.lockstate",
-            &token,
-            DispatchQueue.main
-        ) { [weak self] tok in
-            var state: UInt64 = 0
-            notify_get_state(tok, &state)
-            if state == 0 {
-                Task { @MainActor [weak self] in await self?.onScreenTurnedOn() }
-            }
+        // NotifyHelper wraps notify_register_dispatch + notify_get_state in ObjC
+        // so notify.h doesn't need to be part of the Swift module.
+        NotifyHelper.observeLockState { [weak self] isScreenOn in
+            // Callback is already delivered on the main queue (see NotifyHelper.m)
+            guard isScreenOn else { return }
+            Task { @MainActor [weak self] in await self?.onScreenTurnedOn() }
         }
-        lockToken = token
     }
 
     private func onScreenTurnedOn() async {
@@ -212,14 +201,18 @@ final class AutomationManager: ObservableObject {
         batteryObserver = NotificationCenter.default.addObserver(
             forName: UIDevice.batteryStateDidChangeNotification,
             object: nil, queue: .main
-        ) { [weak self] _ in self?.reevaluate() }
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.reevaluate() }
+        }
     }
 
     private func setupOrientationObserver() {
         orientationObserver = NotificationCenter.default.addObserver(
             forName: UIDevice.orientationDidChangeNotification,
             object: nil, queue: .main
-        ) { [weak self] _ in self?.reevaluate() }
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.reevaluate() }
+        }
     }
 
     private func setupWifiMonitor() {
@@ -232,9 +225,8 @@ final class AutomationManager: ObservableObject {
     }
 
     private func setupTimeTimer() {
-        // Re-evaluate every 60 s so time-range transitions are caught promptly.
         timeTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            self?.reevaluate()
+            Task { @MainActor [weak self] in self?.reevaluate() }
         }
     }
 
