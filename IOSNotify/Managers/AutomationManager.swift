@@ -219,6 +219,10 @@ final class AutomationManager: ObservableObject {
 
     private func onScreenTurnedOn() async {
         guard config.isEnabled else { return }
+        // Only fire when the app is in the background (lock screen wake).
+        // If the app is active the user is already using the phone, which means
+        // the phone is unlocked — wrong scenario.
+        guard UIApplication.shared.applicationState != .active else { return }
         let met = await evaluateConditions()
         guard met else { return }
         triggerShortcut()
